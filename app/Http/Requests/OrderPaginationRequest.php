@@ -21,16 +21,22 @@ use Illuminate\Contracts\Validation\Validator;
  *
  * and the mirror image for to_date. Note `o.to_date == undefined` — the guard
  * fires when to_date is ABSENT, which is the opposite of what the message says.
- * Worked through:
+ * The two clauses before it, `!== null` and `!== ''`, mean a key that is present
+ * and null (or empty) does NOT count as absent. Worked through:
  *
- *   both absent        -> both guards fire, both fields fail  -> 400
- *   only from_date set -> the to_date guard fires, to_date fails -> 400
- *   only to_date set   -> the from_date guard fires, from_date fails -> 400
- *   both present       -> neither guard fires -> passes
+ *   both keys absent      -> both guards fire, both fields fail -> 400
+ *   from_date sent, to_date absent -> from_date's guard fires; a non-empty
+ *                            string passes it, so -> 200
+ *   to_date sent, from_date absent -> mirror image -> 200
+ *   both keys present (any value, including null or '') -> no guard -> 200
  *
- * So in practice BOTH dates are mandatory on this endpoint, and a request with
- * neither is a 400 — which is what the live Nest API does today. The panel
- * always sends both.
+ * So only a request omitting BOTH keys is rejected. Sending them as null or ''
+ * is accepted, which is what the panel does: the order filter initialises its
+ * date controls to '' and the report filters initialise theirs to null.
+ *
+ * An earlier revision of this class read `$this->input('to_date') === null` for
+ * absence. That conflated null with absent and 400'd both of those panel pages
+ * on first load, where the Node API answers 200.
  */
 class OrderPaginationRequest extends ApiFormRequest
 {
@@ -54,9 +60,24 @@ class OrderPaginationRequest extends ApiFormRequest
             $fromDate = $this->input('from_date');
             $toDate = $this->input('to_date');
 
-            // `o.x == undefined` — absent or null, matching JS loose equality.
-            $toDateAbsent = $toDate === null;
-            $fromDateAbsent = $fromDate === null;
+            /*
+             * The guard is `o.to_date !== null && o.to_date !== '' && o.to_date == undefined`.
+             * The first two clauses exclude null and '' outright, so the whole
+             * condition is true only when the key is genuinely ABSENT from the
+             * body — `undefined` in JS. A present-but-null value skips it.
+             *
+             * Laravel collapses that distinction twice over: `$this->input('to_date')`
+             * returns null for both cases, and ConvertEmptyStringsToNull has already
+             * rewritten '' to null by this point. has() is checked instead, because it
+             * reports key presence rather than value emptiness.
+             *
+             * Getting this wrong is not academic: the panel's report filters
+             * initialise their date controls to null and its order filter to '',
+             * so treating either as absent 400s both pages on first load, where
+             * the Node API answers 200.
+             */
+            $toDateAbsent = ! $this->has('to_date');
+            $fromDateAbsent = ! $this->has('from_date');
 
             /*
              * Message order is part of the payload the panel receives, and

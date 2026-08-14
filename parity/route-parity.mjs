@@ -4,11 +4,14 @@
  * mechanically rather than by eye.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
-const NEST_SRC = 'd:/projects/gss/graspcraft/graspcraft_backend/src';
-const LARAVEL = 'd:/projects/gss/graspcraft/graspcraft_laravel';
+// Resolved from this file's own location, so the harness runs from any checkout.
+// These were absolute paths to the original author's machine and worked nowhere else.
+const LARAVEL = resolve(fileURLToPath(import.meta.url), '../..');
+const NEST_SRC = resolve(LARAVEL, '../graspcraft_backend/src');
 
 function walk(dir) {
   const out = [];
