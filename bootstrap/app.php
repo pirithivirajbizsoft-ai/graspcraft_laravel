@@ -8,6 +8,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 /*
@@ -24,8 +25,20 @@ return Application::configure(basePath: dirname(__DIR__))
         // app.setGlobalPrefix('api/')
         api: __DIR__.'/../routes/api.php',
         apiPrefix: 'api',
+        web: __DIR__.'/../routes/web.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
+        then: function () {
+            /*
+             * The Angular build is configured to call /api/v1/*. Rather than
+             * touch routes/api.php (which stays the source of truth and keeps
+             * working unmodified at /api/* for any other caller), load the same
+             * file a second time under an additional prefix with the same 'api'
+             * middleware group (MethodWhitelist, SecureHeaders, throttle:api) -
+             * identical behaviour, two addresses.
+             */
+            Route::middleware('api')->prefix('api/v1')->group(__DIR__.'/../routes/api.php');
+        },
     )
     ->withMiddleware(function (Middleware $middleware): void {
         /*

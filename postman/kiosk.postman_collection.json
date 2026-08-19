@@ -1,0 +1,891 @@
+{
+  "info": {
+    "_postman_id": "a1e29b40-6c2d-4b1a-9f3e-1a2b3c4d5e01",
+    "name": "PhotoCraft AI - Kiosk API",
+    "description": "Endpoints called by the on-site photo Kiosk / booth terminal (photographer capture & upload, AI face match against the day's uploads, product/frame selection, cart, checkout and order management at the counter).\n\nBackend: `graspcraft_laravel` (Laravel port of `graspcraft_backend` NestJS API). Base path is `/api` (see `bootstrap/app.php`).\n\n**Auth note:** `JwtMiddleware` exists but is **not currently registered** in `bootstrap/app.php`, so every endpoint is unauthenticated today. This collection still sends `Authorization: Bearer {{token}}` on every request except Login, so it keeps working the moment auth is turned on.\n\n**Response envelope:** every JSON endpoint (except the pre-signed image URL's redirect target and the ZIP download) replies\n```\n{ \"code\": number, \"status\": boolean, \"msg\": string, \"data\": any }\n```\nA business failure (bad password, missing record, etc.) is **not** an HTTP error - it comes back with a 200/201 status and `status: false`. Always branch on the body's `status`, not the HTTP status.\n\nRoutes here were confirmed against the controllers/services (not just route names) - see the per-request description for the code reference and any quirks.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "country_code",
+      "value": "+60",
+      "type": "string"
+    },
+    {
+      "key": "customer_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "pguser_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "kiosk_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "order_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cart_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "frame_img_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login (Kiosk / Photographer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/user-login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "user-login"
+              ]
+            },
+            "description": "`UsersController::userLogin` -> `UsersService::userLogin`.\n\nRequired: `username`, `password`. `type` selects the table: any value other than `\"customer\"` is looked up against `users` (kiosk/photographer/staff/admin accounts); `type: \"customer\"` looks up `customers`.\n\nThe password is matched by deterministic-cipher equality, not bcrypt. On success the row is returned with an extra `token` (HS256 JWT, 1-day expiry, same secret/claims as the Node app) grafted onto `data.token`. On a bad username/password the envelope comes back `status: false` with a 201 HTTP status (this is a POST route) - it is NOT a 401.\n\nThis is the one route excluded from `JwtMiddleware` once auth is enabled.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"kiosk_booth01\",\n  \"password\": \"Passw0rd@123\",\n  \"type\": \"kiosk\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (e) { json = {}; }",
+                  "",
+                  "pm.test('login response has a body', function () {",
+                  "    pm.expect(json).to.be.an('object');",
+                  "});",
+                  "",
+                  "if (json && json.status && json.data) {",
+                  "    if (json.data.token) {",
+                  "        pm.collectionVariables.set('token', json.data.token);",
+                  "    }",
+                  "    if (json.data.id) { pm.collectionVariables.set('pguser_id', json.data.id); }",
+                  "    if (json.data.id) { pm.collectionVariables.set('kiosk_id', json.data.id); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users/user-logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "user-logout"
+              ]
+            },
+            "description": "`UsersController::userLogout`. Stateless no-op server-side (there is no session/token blocklist) - the client is expected to discard its own `token`. Always returns `status: true`."
+          },
+          "response": []
+        },
+        {
+          "name": "Register Customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/customer-registor",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "customer-registor"
+              ]
+            },
+            "description": "`UsersController::customerRegistor` -> `UsersService::customerRegistor`. Creates a row in `customers`. Path is spelled `customer-registor` in the live route table - that is not a typo in this collection, it is what the API actually exposes.\n\nRequired for a usable account: `user_name`, `email_id`, `password`. `name`, `ph_number`, `customer_code`, `role_id` are accepted but optional. Uniqueness is checked on `user_name` + `email_id` together; a duplicate throws and the envelope comes back `status: false`. `password` is encrypted before storage - it is the only encrypted column on `customers`.\n\nNo server-side field validation beyond that (this route takes the raw request body, unlike the Admin master-data routes which use typed FormRequests).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Tan\",\n  \"user_name\": \"johntan\",\n  \"email_id\": \"john.tan@example.com\",\n  \"ph_number\": \"{{country_code}}123456789\",\n  \"password\": \"Passw0rd@123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot Password (Check User Exists)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/check-exist-user",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "check-exist-user"
+              ]
+            },
+            "description": "`UsersController::checkExistUser` -> `UsersService::checkExistUser`. Required: `user_name`, `email_id` (both, exact match against `users`). Returns the matching row's `id` on success; when no row matches it throws and the envelope carries `status: false` with the message \"User does'nt exist...!\" (exact wording from the source).\n\nNote: `email_id` is compared as plaintext against the encrypted column, so this only ever matches rows whose email was stored before encryption was introduced - a known, reproduced quirk, not something to 'fix' in a test.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_name\": \"johntan\",\n  \"email_id\": \"john.tan@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Kiosk Capture & Upload",
+      "item": [
+        {
+          "name": "Upload Captured Photos",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pguser/imges-upload/image?pguser_id={{pguser_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pguser",
+                "imges-upload",
+                "image"
+              ],
+              "query": [
+                {
+                  "key": "pguser_id",
+                  "value": "{{pguser_id}}"
+                }
+              ]
+            },
+            "description": "`PguserController::uploads3` -> `PguserService::uploads3`. Path segment `image` is `uploadtype` (path param, not query) - it selects the S3 bucket and whether an `images_upload` row is written. Other values (`frame`, `product`, `combo`, `ads`, `framedImages`, `object`, `ultraObject`) exist on the same route but are Web/admin master-data upload flows, out of scope for this collection - `image` is the one the kiosk capture screen actually uses.\n\n`pguser_id` query param is required - the logged-in kiosk/photographer's user id. `files` (multipart, one or more) is required - Rekognition indexing happens against these on upload. `photoToFrameMap` is a JSON-string form field, only read when uploadtype is `framedImages`.\n\nOn a partial failure the response still comes back 201 but with an `error` key inside `data` - check for that, not just the envelope `status`.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": [],
+                  "description": "One or more captured photo files (repeat the 'files' key per file)."
+                },
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": [],
+                  "description": "Second file, optional - shows the multi-file shape."
+                },
+                {
+                  "key": "photoToFrameMap",
+                  "type": "text",
+                  "value": "",
+                  "description": "JSON string, only used when uploadtype is 'framedImages'. Leave empty for a plain capture upload (uploadtype=image)."
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "My Upload Dashboard (counts)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pguser/dashboard/{{pguser_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pguser",
+                "dashboard",
+                "{{pguser_id}}"
+              ]
+            },
+            "description": "`PguserController::dashboard` -> `PguserService::dashboard`. Path param `pguser_id` (required). Returns lifetime and today's upload counts for this kiosk/photographer, e.g. `[{ \"total_count\": \"42\", \"today_count\": \"5\" }]` (counts are returned as strings - Postgres bigint aggregates)."
+          },
+          "response": []
+        },
+        {
+          "name": "My Upload History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pguser/get-history/{{pguser_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pguser",
+                "get-history",
+                "{{pguser_id}}"
+              ]
+            },
+            "description": "`PguserController::getHistory` -> `PguserService::getHistory`. Path param `pguser_id` (required). One row per upload batch (grouped by time/date/created_at), newest first - lets the kiosk show 'sessions uploaded today'."
+          },
+          "response": []
+        },
+        {
+          "name": "Save Retouched Frame Image",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pguser/save-edited-frame/{{frame_img_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pguser",
+                "save-edited-frame",
+                "{{frame_img_id}}"
+              ]
+            },
+            "description": "`PguserController::saveEditedFrame` -> `PguserService::saveEditedFrame`. Path param `frame_img_id` (a `fram_img_map.id`, required). Multipart `file` is required. Uploads the retouched image, marks the fram-img-map row `is_edited = true`, and returns a pre-signed URL so the kiosk can show the result immediately.\n\nHandled failures (`file` missing, or `frame_img_id` not found) come back as `status: false` with a specific message rather than the generic error - useful to assert on directly.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Required. The retouched/edited image file."
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Face Recognition (AI Match)",
+      "item": [
+        {
+          "name": "Compare Face Against Today's Uploads (AI Match)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users/compare-user-faces",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "compare-user-faces"
+              ]
+            },
+            "description": "`UsersController::compareUserFaces` -> `UsersService::compareImages`. This is the AI/Rekognition face-match step (documented in the service as the kiosk's face match): sends `file` to AWS Rekognition and matches it against the requested date/time window of `images_upload` rows.\n\nBehaviour to test for:\n- No active frame configured -> `status:false`, message is the 'no active frame' notice.\n- `file` omitted, or Rekognition finds no match -> falls back to returning every upload in the requested date/time window instead (`comparedImages`, `unmatchedFaces: true`).\n- A genuine match -> `{ frames: [...], comparedImages: [...], unmatchedFaces: false }`.\n\n`photoFrameRequest` fields are read from a JSON **string**, not nested JSON - keep it as a form-data text field, not a nested object.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Required to actually run a face match. The captured/selfie photo."
+                },
+                {
+                  "key": "photoFrameRequest",
+                  "type": "text",
+                  "value": "{\"date\":\"19-08-2026\",\"from_time\":\"09:00 AM\",\"to_time\":\"11:00 PM\"}",
+                  "description": "JSON string. date=dd-mm-yyyy (required for the date filter to apply); from_time/to_time are 'hh:mm AM/PM' strings, optional."
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Customer & Photos",
+      "item": [
+        {
+          "name": "Get My Uploaded Images",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/get-customer-images",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "get-customer-images"
+              ]
+            },
+            "description": "`UsersController::getCustomerImages` -> `UsersService::customerImages`. Required: `customer_id`. `page_no`/`limit` optional (default 1/10). Returns `{ count, rows }` from `images_upload` where `customer_id` matches.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"page_no\": 1,\n  \"limit\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete My Uploaded Images",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/delete-customer-images",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "delete-customer-images"
+              ]
+            },
+            "description": "`UsersController::deleteCustomerImages` -> `UsersService::deleteCustomerImages`. Required: `ids` (array of `images_upload.id`). This is a HARD delete (`forceDelete`), not a soft delete - there is no undo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\"<images-upload-id-1>\", \"<images-upload-id-2>\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Product/Combo Screen + My Framed Photos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users/get-frame-with-images/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "get-frame-with-images",
+                "{{customer_id}}"
+              ]
+            },
+            "description": "`UsersController::getFrameWithImages` -> `UsersService::getFrameWithImages`. Path param `customer_id` (required). Documented in the source as 'the kiosk's product screen': every active combo with its products, plus the frame images already composed for this customer (`fram_img_map` rows).\n\nReturns `status:false` (EM014) when no combo is configured at all - that is a real, testable state, not just an edge case."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Customer",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/update-customer/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "update-customer",
+                "{{customer_id}}"
+              ]
+            },
+            "description": "`UsersController::updateCustomer` -> `UsersService::updateCustomer`. Path param `customer_id` (required). `role_id` in the body is required and must resolve to an existing staff `users` row (this is how the operator attributes a customer to the staff member checking them in) - an unresolvable `role_id` returns `status:false` (EM017), a real 'wrong ID' state worth testing, not a 404.\n\nAny other `customers` column (`name`, `ph_number`, `email_id`, `customer_code`) can be included and is written through as-is.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role_id\": \"<staff-role-id>\",\n  \"name\": \"John Tan\",\n  \"ph_number\": \"{{country_code}}123456789\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Downloadable Image URL",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/download-framed-img/edited_12345678.jpg",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "download-framed-img",
+                "edited_12345678.jpg"
+              ]
+            },
+            "description": "`AppController::downloadFramedImg`. Path param is the stored S3 key/filename (e.g. an `img_url`/`merged_img_name`/`edited_img_name` value from an earlier response) - replace `edited_12345678.jpg` with a real key. Returns a pre-signed download URL in `data`, not the binary image itself."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Emailed Images For an Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/emailed-images",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "emailed-images"
+              ]
+            },
+            "description": "`UsersController::emailedImages` -> `UsersService::getEmailedImages`. Required: `order_id` (the `orders.order_id` string), `customer_id`. Returns the file names of the order's 'email' product images.\n\nSide effect worth knowing before you re-run this in a test: it bumps `orders.print_count` and rewrites the customer's stored `name`/`email_id` from the order snapshot every time it's called.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_id\": \"{{order_id}}\",\n  \"customer_id\": \"{{customer_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Download Order Images (ZIP)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/download-images-zip",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "download-images-zip"
+              ]
+            },
+            "description": "`UsersController::downloadImagesZip`. Required: `order_id`. **This route does not use the standard envelope**: on success it streams a binary `application/zip` file directly (use Postman's \"Save Response > Save to a file\"); when the order has no emailed images it answers a bare 404 JSON `{ status: false, msg: \"No images found for this order\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_id\": \"{{order_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Cart",
+      "item": [
+        {
+          "name": "Add to Cart",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/cart/create-cart",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cart",
+                "create-cart"
+              ]
+            },
+            "description": "`CartController::create` -> `CartService::create`. Required: `customer_id`, `combo_id`, `combo_map` (the whole basket-line snapshot - `combo_map` is written into the stored `combo_json` column). `product_list[].product_type` drives how images are resolved later (`magnet`, a certificate type, or the default frame lookup via `frame_img_ids`). `qty` optional (defaults handled by the column default).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"combo_id\": \"<combo-id>\",\n  \"combo_map\": {\n    \"combo_id\": \"<combo-id>\",\n    \"product_list\": [\n      {\n        \"product_id\": \"<product-id>\",\n        \"product_type\": \"email\",\n        \"photo_limit\": 1,\n        \"frame_img_ids\": [\"{{frame_img_id}}\"]\n      }\n    ]\n  },\n  \"qty\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (e) { json = {}; }",
+                  "if (json && json.status && json.data && json.data.id) {",
+                  "    pm.collectionVariables.set('cart_id', json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get My Cart",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/cart/getall-cart/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cart",
+                "getall-cart",
+                "{{customer_id}}"
+              ]
+            },
+            "description": "`CartController::findAll` -> `CartService::findAll`. Path param `customer_id` (required). Every cart row for this customer, with the combo/products resolved and each product's `framedNames` attached."
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Single Cart Item",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/cart/delete-single-cart/{{cart_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cart",
+                "delete-single-cart",
+                "{{cart_id}}"
+              ]
+            },
+            "description": "`CartController::remove` -> `CartService::deleteOneCart`. Path param `cart_id` (required). Hard delete of one `cart` row."
+          },
+          "response": []
+        },
+        {
+          "name": "Clear Cart (Multiple)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/cart/delete-multiple-cart/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cart",
+                "delete-multiple-cart",
+                "{{customer_id}}"
+              ]
+            },
+            "description": "`CartController::removeMultiple` -> `CartService::deleteMultipleCart`. Path param `customer_id` (required). Hard-deletes every cart row for this customer - this is what clears the basket right after checkout."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Order (Basket Resolved)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/cart/get-order-by-id/{{order_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cart",
+                "get-order-by-id",
+                "{{order_id}}"
+              ]
+            },
+            "description": "`CartController::getOneOrder` -> `CartService::getOneOrder`. Path param `order_id` (the `orders.order_id` string, required). Returns the order with its basket, where every `frame_img_ids` array has been replaced with resolved `frame_img_names` - built for a receipt/confirmation screen. Throws (`status:false`) when the order does not exist."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Discount",
+      "item": [
+        {
+          "name": "Get Discount Amount by Code",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/discount/get-amount-by-code/WELCOME10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "discount",
+                "get-amount-by-code",
+                "WELCOME10"
+              ]
+            },
+            "description": "`DiscountController::findAmount` -> `DiscountService::findAmount`. Path param is the discount code the customer typed in (required). An unknown code returns `status:false` (EM018) rather than a 404 - assert on the body, not the HTTP status."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Orders / Checkout",
+      "item": [
+        {
+          "name": "Create Order (Checkout)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/create-order",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "create-order"
+              ]
+            },
+            "description": "`UsersController::createOrder` -> `UsersService::createOrder`. `customer_id` and `amount` are the practical minimum; `date`, `time` and `order_id` are generated server-side and do not need to be sent. `payment_type` is one of `card`/`cash`/`qr`. `order_status` is one of `pending`/`failed`/`cancelled`/`completed` (`pending` is typical at creation).\n\n`staff_code` is optional, but if supplied it must resolve to an active staff member - an unresolvable code throws a **dedicated 400** (`ER002`) carrying the exact message, so the client can show it verbatim. That is the one route in this collection where a failure IS a real HTTP error, not just `status:false`.\n\nResponse includes a `sendMail` flag telling the caller whether this order contains an emailed product (drives a 'we'll email your photos' prompt).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"kiosk_id\": \"{{kiosk_id}}\",\n  \"amount\": \"150.00\",\n  \"discount\": \"0\",\n  \"payment_type\": \"cash\",\n  \"order_status\": \"pending\",\n  \"staff_code\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (e) { json = {}; }",
+                  "if (json && json.status && json.data && json.data.order_id) {",
+                  "    pm.collectionVariables.set('order_id', json.data.order_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Order Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/update-order/{{order_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "update-order",
+                "{{order_id}}"
+              ]
+            },
+            "description": "`UsersController::updateOrder` -> `UsersService::updateOrder`. Path param `order_id` (the `orders.order_id` string; note this is not unique, so the update can touch more than one row). Any `orders` column can be sent; `order_status` is the meaningful one - transitioning to `completed` accrues staff commission (once, guarded against double-accrual), transitioning to `cancelled`/`failed` reverses pending commission.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_status\": \"completed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search Orders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/getall-orders",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "getall-orders"
+              ]
+            },
+            "description": "`UsersController::findAllOrders` -> `UsersService::findAllOrders`. `user_type` is **required**. `from_date`/`to_date` have an odd, deliberately-reproduced validation quirk: omitting BOTH is fine, sending only one of them fails validation - if you use date filtering, always send both (empty string is accepted).\n\nWhen `logined_userId` is set and `user_type` is not one of the admin-tier types, results are scoped to the kiosks that operator's role grants (`role_kiosk_map`) - this is what makes the endpoint kiosk-operator-safe to expose (an operator only ever sees their own kiosk's orders). Returns `{ count, rows, total_amount }` - `total_amount` is summed across the whole filtered set, not just the current page.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_type\": \"kiosk\",\n  \"logined_userId\": \"{{kiosk_id}}\",\n  \"page_no\": 1,\n  \"limit\": 10,\n  \"search_text\": \"\",\n  \"from_date\": \"\",\n  \"to_date\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Order By Id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users/get-order-by/<order-row-id>",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "get-order-by",
+                "<order-row-id>"
+              ]
+            },
+            "description": "`UsersController::findOneOrder` -> `UsersService::findOneOrder`. Path param is the `orders.id` primary key (not the `order_id` string used by the cart/checkout routes above) - required. Returns the order with its kiosk `user` relation resolved to `{id, name}`."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
