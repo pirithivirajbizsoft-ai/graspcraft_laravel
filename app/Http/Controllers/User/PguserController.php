@@ -9,6 +9,7 @@ use App\Support\Enums\UploadType;
 use App\Support\Messages;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
 /** Port of graspcraft_backend/src/modules/user/pguser/pguser.controller.ts. */
@@ -42,7 +43,13 @@ class PguserController extends Controller
             }
 
             $data = $this->pguserService->uploads3(
-                files: $request->file('files') ?? [],
+                /*
+                 * The frontend appends the field as `files`, not `files[]`, so
+                 * PHP hands back a single UploadedFile whenever one file is sent
+                 * - multer's FilesInterceptor always gave Node an array. Wrap it
+                 * so the service keeps its `UploadedFile[]` contract.
+                 */
+                files: Arr::wrap($request->file('files')),
                 uploadType: $type,
                 userId: $request->query('pguser_id'),
                 photoToFrameMap: $request->input('photoToFrameMap'),
