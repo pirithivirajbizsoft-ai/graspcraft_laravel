@@ -57,6 +57,21 @@ class User extends BaseModel
         'status' => 'boolean',
     ];
 
+    /**
+     * @Default('') on role_id in the Node model.
+     *
+     * Unlike every other default in this port, this one is load bearing rather
+     * than cosmetic: role_id is half of the composite primary key and is NOT
+     * NULL with no column default, so a user_type that carries no staff ID —
+     * kiosk and photographer are created from the masters screens without one —
+     * has nothing to insert and the row is rejected outright. Sequelize filled
+     * the gap with the empty string, which is why existing rows created that way
+     * hold '' rather than NULL.
+     */
+    protected $attributes = [
+        'role_id' => '',
+    ];
+
     // ─── encrypted attributes ────────────────────────────────────────────────
 
     protected function name(): Attribute
