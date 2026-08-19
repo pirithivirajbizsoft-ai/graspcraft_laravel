@@ -7,7 +7,7 @@ use App\Http\Requests\OrderPaginationRequest;
 use App\Services\StaffCodeError;
 use App\Services\UsersService;
 use App\Support\ApiResponse;
-use App\Support\AwsConfig;
+use App\Support\LocalImageStorage;
 use App\Support\Messages;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -337,7 +337,7 @@ class UsersController extends Controller
             ], 404);
         }
 
-        $aws = new AwsConfig;
+        $localStorage = new LocalImageStorage;
 
         // ZipArchive needs a real file, so the archive is built in a temp file and
         // streamed out. JSZip's DEFLATE level 6 is ZipArchive's default.
@@ -348,7 +348,9 @@ class UsersController extends Controller
 
         foreach ($imageNames as $imgName) {
             try {
-                $zip->addFromString($imgName, $aws->downloadImgBuffer($imgName));
+                // basename(), not the folder-qualified key, so the zip entry
+                // name is unchanged from before local storage added a folder.
+                $zip->addFromString(basename($imgName), $localStorage->get($imgName));
             } catch (\Throwable $e) {
                 // One unreachable object must not fail the whole download — the
                 // Node version logs and carries on too.

@@ -5,8 +5,8 @@ namespace App\Services;
 use App\Models\ObjectMaster;
 use App\Models\UltraObjectMaster;
 use App\Models\UltraObjectObjMap;
-use App\Support\AwsConfig;
 use App\Support\Enums\UploadType;
+use App\Support\LocalImageStorage;
 use Illuminate\Http\UploadedFile;
 
 /**
@@ -21,20 +21,11 @@ class UltraObjectMasterService
 {
     public function uploadImage(UploadedFile $file): string
     {
-        $aws = new AwsConfig;
-        $bucket = UploadType::ULTRA_OBJECT->bucket();
-
         $random8DigitString = (string) random_int(10000000, 99999999);
         $extension = $file->getClientOriginalExtension();
-        $key = UploadType::ULTRA_OBJECT->prefix().$random8DigitString.'.'.$extension;
+        $key = UploadType::ULTRA_OBJECT->localFolder().'/'.UploadType::ULTRA_OBJECT->prefix().$random8DigitString.'.'.$extension;
 
-        $aws->uploadToS3(
-            bucket: $bucket,
-            key: $key,
-            body: file_get_contents($file->getRealPath()),
-            contentType: $file->getMimeType(),
-            uploadType: UploadType::ULTRA_OBJECT->value,
-        );
+        (new LocalImageStorage)->store($key, file_get_contents($file->getRealPath()));
 
         return $key;
     }

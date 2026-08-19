@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Models\ObjectMaster;
-use App\Support\AwsConfig;
 use App\Support\Enums\UploadType;
+use App\Support\LocalImageStorage;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 
@@ -12,27 +12,19 @@ use Illuminate\Support\Collection;
 class ObjectMasterService
 {
     /**
-     * Upload the object image to the masters bucket and return its S3 key.
+     * Upload the object image to local storage and return its key.
      *
      * The key is what ends up in img_url, and the panel renders
-     * `frameBaseUrl + img_url`, so the 'objects/' prefix is part of the URL.
+     * `frameBaseUrl + img_url`, so the 'web-master/objects/' folder is part of
+     * the URL.
      */
     public function uploadImage(UploadedFile $file): string
     {
-        $aws = new AwsConfig;
-        $bucket = UploadType::OBJECT->bucket();
-
         $random8DigitString = (string) random_int(10000000, 99999999);
         $extension = $file->getClientOriginalExtension();
-        $key = UploadType::OBJECT->prefix().$random8DigitString.'.'.$extension;
+        $key = UploadType::OBJECT->localFolder().'/'.UploadType::OBJECT->prefix().$random8DigitString.'.'.$extension;
 
-        $aws->uploadToS3(
-            bucket: $bucket,
-            key: $key,
-            body: file_get_contents($file->getRealPath()),
-            contentType: $file->getMimeType(),
-            uploadType: UploadType::OBJECT->value,
-        );
+        (new LocalImageStorage)->store($key, file_get_contents($file->getRealPath()));
 
         return $key;
     }

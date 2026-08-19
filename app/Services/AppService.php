@@ -5,8 +5,8 @@ namespace App\Services;
 use App\Models\Order;
 use App\Models\Role;
 use App\Models\User;
-use App\Support\AwsConfig;
 use App\Support\Enums\UsersType;
+use App\Support\LocalImageStorage;
 use App\Support\Mail\Mailer;
 use Carbon\Carbon;
 
@@ -169,9 +169,9 @@ class AppService
         return $dto;
     }
 
-    /** Presigned download URL for a framed image. */
+    /** Local storage download URL for a framed image. */
     public function downloadFramedImg(string $img): string
     {
-        return (new AwsConfig)->downloadImg($img);
+        return (new LocalImageStorage)->url($img);
     }
 }

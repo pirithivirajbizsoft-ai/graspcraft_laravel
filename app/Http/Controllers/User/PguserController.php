@@ -41,8 +41,21 @@ class PguserController extends Controller
                 );
             }
 
+            /*
+             * Node's FilesInterceptor('files') always hands the service an
+             * array, even for one file. Request::file('files') doesn't: with a
+             * single file under a non-array field name it returns one
+             * UploadedFile instead of an array of them, which PguserService's
+             * array $files parameter then rejects with a TypeError.
+             */
+            $files = $request->file('files') ?? [];
+
+            if (! is_array($files)) {
+                $files = [$files];
+            }
+
             $data = $this->pguserService->uploads3(
-                files: $request->file('files') ?? [],
+                files: $files,
                 uploadType: $type,
                 userId: $request->query('pguser_id'),
                 photoToFrameMap: $request->input('photoToFrameMap'),

@@ -49,14 +49,38 @@ enum UploadType: string
     }
 
     /**
+     * Top-level local storage folder for this type, now that image uploads are
+     * written to Laravel's local disk instead of S3.
+     *
+     * IMAGE has no static folder: the same upload endpoint is used for both a
+     * photographer's App capture and a Kiosk capture, so PguserService resolves
+     * 'app' vs 'kiosk' per request from the uploading user's user_type and
+     * ignores this method for that one case.
+     *
+     * FRAMED_IMAGES (kiosk composite/order images and retouched images) nests
+     * under kiosk/, since both are produced by the kiosk-tied endpoints.
+     */
+    public function localFolder(): ?string
+    {
+        return match ($this) {
+            self::IMAGE => null,
+            self::FRAMED_IMAGES => 'kiosk/framed',
+            self::FRAME,
+            self::PRODUCT,
+            self::COMBO,
+            self::PRODUCTCOMBO,
+            self::OBJECT,
+            self::ULTRA_OBJECT,
+            self::ADS => 'web-master',
+        };
+    }
+
+    /**
      * Bucket for this upload type.
      *
-     * Everything except image and framedImages resolves to the masters bucket —
-     * AWS_FRAME_BUCKET, AWS_PRODUCTCOMBO_BUCKET and AWS_ADS_BUCKET all hold the
-     * same value. They stay as separate vars only so no caller has to change;
-     * what separates the masters inside that bucket is prefix().
-     *
-     * Mirrors PguserService.getBucketByType.
+     * No longer called by any upload flow — every image upload now writes to
+     * local storage via LocalImageStorage (see localFolder() above). Left in
+     * place, unused, in case S3 storage is ever reinstated.
      */
     public function bucket(): ?string
     {

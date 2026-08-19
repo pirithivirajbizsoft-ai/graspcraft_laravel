@@ -7,6 +7,7 @@ use Aws\Rekognition\RekognitionClient;
 use Aws\Result;
 use Aws\S3\S3Client;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -102,11 +103,39 @@ class AwsConfig
     }
 
     /**
+     * Index a face straight from bytes, for a raw capture that is now written to
+     * local storage instead of S3.
+     *
+     * ExternalImageId cannot contain '/' (AWS rejects it), so $key must be the
+     * flat filename, NOT the folder-qualified local storage path stored in
+     * img_url. getMatchedImages() below matches on that same flat filename.
+     */
+    public function indexFaceBytes(string $key, string $imageBytes): void
+    {
+        $result = $this->rekognition->indexFaces([
+            'CollectionId' => config('photocraft.aws.collection_id'),
+            'Image' => ['Bytes' => $imageBytes],
+            'ExternalImageId' => $key,
+        ]);
+
+        Log::info('Indexed face from image', [
+            'key' => $key,
+            'faces' => count($result['FaceRecords'] ?? []),
+        ]);
+    }
+
+    /**
      * Search the face collection for the supplied photo and return the matching
      * images-uploads rows.
      *
      * Threshold 90 / MaxFaces 10 are the Node values. The rows come back
      * newest-first and carry only id and img_url, which is what the kiosk needs.
+     *
+     * img_url is now folder-qualified (e.g. 'app/12345678.jpg' or
+     * 'kiosk/12345678.jpg') but ExternalImageId is the flat filename indexFaces
+     * was given (folders aren't allowed in that field), so the match is done on
+     * the filename suffix of img_url rather than by exact equality. This still
+     * matches pre-migration rows, whose img_url was already flat.
      *
      * @return Collection<int, ImagesUpload>
      */
@@ -128,7 +157,7 @@ class AwsConfig
 
         return ImagesUpload::query()
             ->select(['id', 'img_url'])
-            ->whereIn('img_url', $keys)
+            ->whereIn(DB::raw("regexp_replace(img_url, '^.*/', '')"), $keys)
             ->orderByDesc('created_at')
             ->get();
     }
