@@ -53,4 +53,27 @@ class LocalImageStorage
     {
         return Storage::disk(self::DISK)->url($path);
     }
+
+    /**
+     * Delete every file under $folder (recursive) whose last-modified time is
+     * older than $days. Used by the App/Kiosk cleanup commands — see
+     * app/Console/Commands/CleanupAppImages and CleanupKioskImages.
+     *
+     * @return int how many files were deleted
+     */
+    public function deleteOlderThan(string $folder, int $days): int
+    {
+        $disk = Storage::disk(self::DISK);
+        $cutoff = now()->subDays($days)->getTimestamp();
+        $deleted = 0;
+
+        foreach ($disk->allFiles($folder) as $path) {
+            if ($disk->lastModified($path) < $cutoff) {
+                $disk->delete($path);
+                $deleted++;
+            }
+        }
+
+        return $deleted;
+    }
 }
