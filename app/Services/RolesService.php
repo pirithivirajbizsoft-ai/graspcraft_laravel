@@ -48,6 +48,10 @@ class RolesService
             $query->where('role_name', 'ILIKE', '%'.$req['search_text'].'%');
         }
 
+        if (! empty($req['user_id'])) {
+            $query->where('user_id', $req['user_id']);
+        }
+
         $count = (clone $query)->count();
 
         $roles = $query
