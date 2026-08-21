@@ -79,6 +79,35 @@ final class Messages
 
     public const EM019 = 'This product is mapped to a combo, so you cannot delete it';
 
+    /*
+     * ─── inventory module ─────────────────────────────────────────────────
+     * New functionality with no Node/graspcraft_backend original — there is
+     * nothing to keep in parity with, so these are free-form.
+     */
+    public const EM020 = 'This unit of measurement is already in use and cannot be deleted.';
+
+    public const EM021 = 'A warehouse with this name already exists.';
+
+    public const EM022 = 'This warehouse has stock movements against it and cannot be deleted.';
+
+    public const EM023 = 'This product has stock on hand and cannot be deleted.';
+
+    public const EM024 = 'The selected unit is not compatible with this product\'s unit of measurement.';
+
+    public const EM025 = 'Opening stock has already been recorded for this product at this warehouse.';
+
+    public const EM026 = 'This product is not stockable.';
+
+    public const EM027 = 'Insufficient stock.';
+
+    public const EM028 = 'A unit of measurement cannot be its own base unit.';
+
+    public const EM030 = 'Unit of measurement is required for an inventory product.';
+
+    public const EM031 = 'The destination warehouse must be different from the source warehouse.';
+
+    public const EM032 = 'No eligible orders were selected for migration.';
+
     // ─── environment names ───────────────────────────────────────────────────
     public const DEVELOPMENT = 'dev';
 

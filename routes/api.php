@@ -11,6 +11,14 @@ use App\Http\Controllers\Admin\UltraObjectMasterController;
 use App\Http\Controllers\AppController;
 use App\Http\Controllers\AwsController;
 use App\Http\Controllers\DiscountController;
+use App\Http\Controllers\Inventory\ProductController as InventoryProductController;
+use App\Http\Controllers\Inventory\StockInController;
+use App\Http\Controllers\Inventory\StockMigrationController;
+use App\Http\Controllers\Inventory\StockMovementController;
+use App\Http\Controllers\Inventory\StockOutController;
+use App\Http\Controllers\Inventory\StockTransferController;
+use App\Http\Controllers\Inventory\UomController;
+use App\Http\Controllers\Inventory\WarehouseController;
 use App\Http\Controllers\RolesController;
 use App\Http\Controllers\User\CartController;
 use App\Http\Controllers\User\PguserController;
@@ -194,4 +202,74 @@ Route::prefix('commission')->group(function () {
     Route::post('get-commissions', [CommissionController::class, 'getCommissions']);
     Route::post('payout', [CommissionController::class, 'payout']);
     Route::post('get-payouts', [CommissionController::class, 'getPayouts']);
+});
+
+/*
+ * ─── inventory ───────────────────────────────────────────────────────────────
+ * New functionality — Product (no category), Unit Measurement, Warehouse,
+ * Stock Movement, Stock In, Stock Out. Not a port of graspcraft_backend
+ * (which has no inventory module); follows the create/getall/getby-id/
+ * update/delete convention used by the newest ported masters (object-master,
+ * ultra-object-master) rather than any Node original.
+ */
+Route::prefix('inventory')->group(function () {
+    Route::prefix('product')->group(function () {
+        Route::post('create', [InventoryProductController::class, 'create']);
+        Route::post('getall', [InventoryProductController::class, 'findAll']);
+        Route::get('getby-id/{id}', [InventoryProductController::class, 'findOne']);
+        Route::patch('update/{id}', [InventoryProductController::class, 'update']);
+        Route::delete('delete/{id}', [InventoryProductController::class, 'remove']);
+        Route::get('{id}/uom-family', [InventoryProductController::class, 'uomFamily']);
+    });
+
+    Route::prefix('uom')->group(function () {
+        Route::post('create', [UomController::class, 'create']);
+        Route::post('getall', [UomController::class, 'findAll']);
+        Route::get('base-units', [UomController::class, 'baseUnits']);
+        Route::get('getby-id/{id}', [UomController::class, 'findOne']);
+        Route::patch('update/{id}', [UomController::class, 'update']);
+        Route::delete('delete/{id}', [UomController::class, 'remove']);
+    });
+
+    Route::prefix('warehouse')->group(function () {
+        Route::post('create', [WarehouseController::class, 'create']);
+        Route::post('getall', [WarehouseController::class, 'findAll']);
+        Route::get('getby-id/{id}', [WarehouseController::class, 'findOne']);
+        Route::patch('update/{id}', [WarehouseController::class, 'update']);
+        Route::delete('delete/{id}', [WarehouseController::class, 'remove']);
+    });
+
+    // Read-only ledger, shared by the Stock In/Out screens for their on-hand lookup.
+    Route::prefix('stock-movement')->group(function () {
+        Route::post('getall', [StockMovementController::class, 'findAll']);
+        Route::get('item-info', [StockMovementController::class, 'itemInfo']);
+        Route::post('warehouse-stock', [StockMovementController::class, 'warehouseStock']);
+        Route::get('getby-id/{id}', [StockMovementController::class, 'findOne']);
+    });
+
+    Route::prefix('stock-in')->group(function () {
+        Route::post('create', [StockInController::class, 'create']);
+    });
+
+    Route::prefix('stock-out')->group(function () {
+        Route::post('create', [StockOutController::class, 'create']);
+    });
+
+    // Moves stock for the same item between two warehouses — two linked rows
+    // in the same stock_movements ledger, not a dedicated table.
+    Route::prefix('stock-transfer')->group(function () {
+        Route::post('create', [StockTransferController::class, 'create']);
+    });
+
+    /*
+     * Turns a customer's order into real stock deductions, manually,
+     * on-demand, from a back-office screen. Orders/checkout stay unaffected —
+     * captureOrder() (called from UsersService::createOrder) only snapshots
+     * cart contents that would otherwise be lost once checkout clears them.
+     */
+    Route::prefix('stock-migration')->group(function () {
+        Route::post('getall', [StockMigrationController::class, 'findAll']);
+        Route::get('getby-id/{orderId}', [StockMigrationController::class, 'findOne']);
+        Route::post('migrate', [StockMigrationController::class, 'migrate']);
+    });
 });

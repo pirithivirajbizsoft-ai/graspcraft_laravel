@@ -6,6 +6,7 @@ use App\Models\DeletedOrder;
 use App\Models\Order;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\Inventory\StockMigrationService;
 use App\Support\Crypto;
 use App\Support\Enums\PaymentType;
 use App\Support\Enums\UsersType;
@@ -37,6 +38,7 @@ class ReportsService
 {
     public function __construct(
         private readonly CommissionEarningService $commissionEarningService,
+        private readonly StockMigrationService $stockMigrationService,
     ) {}
 
     /**
@@ -1016,6 +1018,18 @@ class ReportsService
                 'deleted',
                 $deletedBy,
             );
+
+            /*
+             * Reverse any Stock Migration deductions before the order rows
+             * disappear. Wrapped so a stock problem can never block the
+             * delete itself — same principle as the commission/archival steps
+             * above already follow for this method.
+             */
+            try {
+                $this->stockMigrationService->reverse($orderId);
+            } catch (\Throwable) {
+                // Never let a reversal failure block the delete.
+            }
 
             return Order::withTrashed()->where('order_id', $orderId)->forceDelete();
         });

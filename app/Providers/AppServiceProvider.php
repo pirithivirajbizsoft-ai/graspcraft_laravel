@@ -2,7 +2,11 @@
 
 namespace App\Providers;
 
+use App\Models\Combo;
+use App\Models\InventoryProduct;
+use App\Models\Product;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -24,6 +28,23 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureRateLimiting();
         $this->configureMailer();
+        $this->configureStockItemMorphMap();
+    }
+
+    /**
+     * The Inventory module's stock ledger (StockMovement/StockBalance,
+     * app/Models/Concerns/ReferencesStockItem.php) can point at three
+     * different kinds of item. A morph map stores the short type string
+     * (rather than a fully-qualified class name) in item_type, matching the
+     * values the Stock In/Out API accepts.
+     */
+    private function configureStockItemMorphMap(): void
+    {
+        Relation::morphMap([
+            'INVENTORY_PRODUCT' => InventoryProduct::class,
+            'PRODUCT' => Product::class,
+            'COMBO' => Combo::class,
+        ]);
     }
 
     /**

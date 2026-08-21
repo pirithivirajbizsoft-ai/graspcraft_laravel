@@ -12,6 +12,7 @@ use App\Models\Order;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\Concerns\HidesJoinKeys;
+use App\Services\Inventory\StockMigrationService;
 use App\Support\ApiResponse;
 use App\Support\AwsConfig;
 use App\Support\Crypto;
@@ -35,6 +36,7 @@ class UsersService
 
     public function __construct(
         private readonly CommissionEarningService $commissionEarningService,
+        private readonly StockMigrationService $stockMigrationService,
     ) {}
 
     // ─── users CRUD ──────────────────────────────────────────────────────────
@@ -588,6 +590,19 @@ class UsersService
 
         $res?->setAttribute('sendMail', $sendMail);
 
+        /*
+         * Stock Migration snapshot: cart is keyed by customer (not order) and
+         * gets hard-deleted by CartService::deleteMultipleCart right after
+         * checkout, so this is the only moment the order's contents can be
+         * captured for a later manual migration. Fire-and-forget — swallowed
+         * internally by captureOrder(), never allowed to affect the sale.
+         */
+        $this->stockMigrationService->captureOrder(
+            $order->order_id,
+            $order->customer_id,
+            $res?->customer?->cart ?? [],
+        );
+
         return $res;
     }
 
@@ -624,6 +639,18 @@ class UsersService
                  * without one.
                  */
                 $this->commissionEarningService->markOrderState($orderRefIds, 'cancelled', null);
+
+                /*
+                 * Reverse any Stock Migration deductions for this order. Wrapped
+                 * so a stock problem can never roll back the status/commission
+                 * update this is nested inside — same "money side and stock side
+                 * are allowed to disagree temporarily" principle as capture.
+                 */
+                try {
+                    $this->stockMigrationService->reverse($orderId);
+                } catch (\Throwable) {
+                    // Never let a reversal failure block the order status update.
+                }
             }
 
             if ($nextStatus === OrderStatus::COMPLETED->value) {
