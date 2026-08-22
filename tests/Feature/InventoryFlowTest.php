@@ -2,9 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Models\Combo;
 use App\Models\InventoryProduct;
-use App\Models\Product;
 use App\Models\Uom;
 use App\Models\Warehouse;
 use App\Services\Inventory\ProductService;
@@ -14,7 +12,6 @@ use App\Services\Inventory\StockOutService;
 use App\Services\Inventory\StockService;
 use App\Services\Inventory\UomService;
 use App\Services\Inventory\WarehouseService;
-use Illuminate\Support\Facades\Schema;
 use Tests\Concerns\CreatesInventorySchema;
 use Tests\TestCase;
 
@@ -254,117 +251,35 @@ class InventoryFlowTest extends TestCase
         $this->assertSame([$pcs->id, $box->id, $carton->id], $family->pluck('id')->all());
     }
 
-    public function test_stock_in_and_out_for_an_existing_catalog_product_tracks_plain_counts(): void
-    {
-        $warehouse = app(WarehouseService::class)->create(['name' => 'Main Store']);
-        $catalogProduct = Product::create(['product_name' => '8x10 Print', 'price' => 500, 'status' => true]);
-
-        $stockInService = app(StockInService::class);
-        $stockOutService = app(StockOutService::class);
-
-        // No uom_id, no unit_cost — Product has no unit-of-measure or costing concept.
-        $movementIn = $stockInService->create([
-            'item_type' => StockService::ITEM_TYPE_PRODUCT,
-            'item_id' => $catalogProduct->id,
-            'warehouse_id' => $warehouse->id,
-            'quantity' => 25,
-            'movement_subtype' => 'OPENING_STOCK',
-        ]);
-
-        $this->assertSame(StockService::ITEM_TYPE_PRODUCT, $movementIn->item_type);
-        $this->assertEquals(25, (float) $movementIn->quantity);
-        $this->assertNull($movementIn->input_uom_id);
-        $this->assertSame('8x10 Print', $movementIn->item_label);
-
-        // products.* gained no new column — the balance lives only in inventory_stock_balances.
-        $this->assertFalse(Schema::hasColumn('products', 'current_stock'));
-        $this->assertEquals(25, app(StockService::class)->totalQuantity(StockService::ITEM_TYPE_PRODUCT, $catalogProduct->id));
-
-        $result = $stockOutService->create([
-            'item_type' => StockService::ITEM_TYPE_PRODUCT,
-            'item_id' => $catalogProduct->id,
-            'warehouse_id' => $warehouse->id,
-            'quantity' => 9,
-            'reason' => 'sale',
-        ]);
-
-        $this->assertEquals(0, (float) $result['movement']->unit_cost, 'Product has no average_cost to price a stock-out from');
-        $this->assertEquals(16, app(StockService::class)->totalQuantity(StockService::ITEM_TYPE_PRODUCT, $catalogProduct->id));
-
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/Insufficient stock/');
-
-        $stockOutService->create([
-            'item_type' => StockService::ITEM_TYPE_PRODUCT,
-            'item_id' => $catalogProduct->id,
-            'warehouse_id' => $warehouse->id,
-            'quantity' => 999,
-            'reason' => 'sale',
-        ]);
-    }
-
-    public function test_combo_stock_is_tracked_independently_of_its_component_products(): void
-    {
-        $warehouse = app(WarehouseService::class)->create(['name' => 'Main Store']);
-        $combo = Combo::create(['combo_name' => 'Family Bundle', 'price' => 2000, 'status' => true]);
-        $componentProduct = Product::create(['product_name' => '8x10 Print', 'price' => 500, 'status' => true]);
-
-        $stockInService = app(StockInService::class);
-
-        // Stocking the component product must not move the combo's own balance.
-        $stockInService->create([
-            'item_type' => StockService::ITEM_TYPE_PRODUCT,
-            'item_id' => $componentProduct->id,
-            'warehouse_id' => $warehouse->id,
-            'quantity' => 100,
-            'movement_subtype' => 'OPENING_STOCK',
-        ]);
-
-        $movement = $stockInService->create([
-            'item_type' => StockService::ITEM_TYPE_COMBO,
-            'item_id' => $combo->id,
-            'warehouse_id' => $warehouse->id,
-            'quantity' => 8,
-            'movement_subtype' => 'OPENING_STOCK',
-        ]);
-
-        $this->assertSame('Family Bundle', $movement->item_label);
-
-        $stockService = app(StockService::class);
-        $this->assertEquals(8, $stockService->totalQuantity(StockService::ITEM_TYPE_COMBO, $combo->id));
-        $this->assertEquals(100, $stockService->totalQuantity(StockService::ITEM_TYPE_PRODUCT, $componentProduct->id));
-    }
-
-    public function test_warehouse_stock_report_lists_balances_across_item_types(): void
+    public function test_warehouse_stock_report_is_scoped_to_inventory_items_only(): void
     {
         $pcs = Uom::create(['name' => 'Piece', 'uom_short' => 'PCS']);
         $warehouse = app(WarehouseService::class)->create(['name' => 'Main Store']);
         $inventoryProduct = app(ProductService::class)->create(['name' => 'Photo Paper', 'uom_id' => $pcs->id, 'unit_price' => 10]);
-        $catalogProduct = Product::create(['product_name' => '8x10 Print', 'price' => 500, 'status' => true]);
 
-        $stockInService = app(StockInService::class);
-        $stockInService->create([
-            'item_type' => StockService::ITEM_TYPE_INVENTORY_PRODUCT,
+        app(StockInService::class)->create([
             'item_id' => $inventoryProduct->id,
             'warehouse_id' => $warehouse->id,
             'quantity' => 5,
             'uom_id' => $pcs->id,
             'movement_subtype' => 'OPENING_STOCK',
         ]);
-        $stockInService->create([
-            'item_type' => StockService::ITEM_TYPE_PRODUCT,
-            'item_id' => $catalogProduct->id,
-            'warehouse_id' => $warehouse->id,
-            'quantity' => 25,
-            'movement_subtype' => 'OPENING_STOCK',
-        ]);
+
+        // A Combo balance from the order-driven stock deduction (see
+        // StockMigrationService) must never surface on this report — it has
+        // its own dedicated Stock Migration screen instead.
+        app(StockService::class)->applyMovement(
+            StockService::ITEM_TYPE_COMBO,
+            'some-combo-id',
+            $warehouse,
+            'IN',
+            8
+        );
 
         $report = app(StockMovementService::class)->warehouseStock(['limit' => 10]);
 
-        $this->assertSame(2, $report['count']);
-        $labels = $report['rows']->pluck('item_label')->all();
-        $this->assertContains('Photo Paper', $labels);
-        $this->assertContains('8x10 Print', $labels);
+        $this->assertSame(1, $report['count']);
+        $this->assertSame('Photo Paper', $report['rows']->first()->item_label);
 
         // pluck() reads the accessor directly regardless of $appends, so it
         // would pass even if item_label never made it into the JSON the API

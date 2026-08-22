@@ -22,6 +22,13 @@ class CreateComboRequest extends ClassValidatorRequest
              * are enforced in ComboService.
              */
             'user_commissions' => ['IsArray', 'IsOptional'],
+            /*
+             * New functionality, not part of the Node DTO this class ports —
+             * declared here purely so whitelisted() does not strip it. Per-row
+             * shape ({inventory_product_id, quantity}) is validated in
+             * BomService, same division of responsibility as user_commissions.
+             */
+            'bom_items' => ['IsArray', 'IsOptional'],
         ];
     }
 }

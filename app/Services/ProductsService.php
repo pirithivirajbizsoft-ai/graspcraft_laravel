@@ -2,29 +2,59 @@
 
 namespace App\Services;
 
+use App\Models\BomItem;
 use App\Models\ProdCombMap;
 use App\Models\Product;
 use App\Models\ProductSize;
+use App\Services\Inventory\BomService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /** Port of graspcraft_backend/src/modules/admin/products/products.service.ts. */
 class ProductsService
 {
+    public function __construct(private readonly BomService $bomService) {}
+
     public function create(array $dto): Product
     {
-        return Product::create($dto);
+        return DB::transaction(function () use ($dto) {
+            $product = Product::create($dto);
+
+            // New functionality, not part of the Node port — see BomService.
+            if (array_key_exists('bom_items', $dto)) {
+                $this->bomService->replaceFor('PRODUCT', $product->id, $dto['bom_items']);
+            }
+
+            return $product;
+        });
     }
 
     public function findOne(string $id): ?Product
     {
-        return Product::query()->where('id', $id)->first();
+        return Product::query()->with('bomItems.inventoryProduct.uom')->where('id', $id)->first();
     }
 
     public function update(string $id, array $dto): array
     {
-        // Sequelize's Model.update() resolves to [affectedCount]; the
-        // controller returns it verbatim, so the panel sees `data: [1]`.
-        return [Product::query()->where('id', $id)->update($dto)];
+        return DB::transaction(function () use ($id, $dto) {
+            // Sequelize's Model.update() resolves to [affectedCount]; the
+            // controller returns it verbatim, so the panel sees `data: [1]`.
+            // bom_items is not a products column, so it's excluded here and
+            // handled separately below — the raw query builder update()
+            // below does not go through $fillable like Product::create() does.
+            $updated = [Product::query()->where('id', $id)->update(
+                array_intersect_key($dto, array_flip([
+                    'product_name', 'price', 'size', 'description', 'photo_limit',
+                    'product_type', 'img_url', 'status', 'certificate_name',
+                ]))
+            )];
+
+            if (array_key_exists('bom_items', $dto)) {
+                $this->bomService->replaceFor('PRODUCT', $id, $dto['bom_items']);
+            }
+
+            return $updated;
+        });
     }
 
     /**
@@ -39,7 +69,16 @@ class ProductsService
             return false;
         }
 
-        return Product::query()->where('id', $id)->delete();
+        $deleted = Product::query()->where('id', $id)->delete();
+
+        if ($deleted) {
+            // New functionality — BOM is configuration, not a historical
+            // reference, so it's cleaned up rather than blocking delete
+            // (mirrors ComboService::remove()'s mapping/commission cleanup).
+            BomItem::query()->where('owner_type', 'PRODUCT')->where('owner_id', $id)->delete();
+        }
+
+        return $deleted;
     }
 
     /** @return array{count: int, rows: Collection} */

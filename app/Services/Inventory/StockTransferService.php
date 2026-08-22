@@ -2,9 +2,7 @@
 
 namespace App\Services\Inventory;
 
-use App\Models\Combo;
 use App\Models\InventoryProduct;
-use App\Models\Product;
 use App\Models\StockMovement;
 use App\Models\Uom;
 use App\Models\Warehouse;
@@ -23,6 +21,10 @@ use Illuminate\Support\Facades\DB;
  * recalculated by a transfer). Unlike the inventory reference this module
  * was built from, this DOES support UOM conversion for an Inventory
  * Product, for consistency with Stock In/Out, which already have it.
+ *
+ * Only ever acts on the Inventory module's own Product (item_type
+ * INVENTORY_PRODUCT) — the pre-existing, Node-owned Product and Combo
+ * catalogs have no stock maintenance of their own.
  */
 class StockTransferService
 {
@@ -32,7 +34,7 @@ class StockTransferService
     public function create(array $dto): array
     {
         return DB::transaction(function () use ($dto) {
-            $itemType = $dto['item_type'];
+            $itemType = StockService::ITEM_TYPE_INVENTORY_PRODUCT;
             $itemId = $dto['item_id'];
             $fromWarehouseId = $dto['from_warehouse_id'];
             $toWarehouseId = $dto['to_warehouse_id'];
@@ -45,39 +47,26 @@ class StockTransferService
             $toWarehouse = Warehouse::query()->findOrFail($toWarehouseId);
 
             $quantity = (float) $dto['quantity'];
-            $inputUom = null;
-            $unitCost = 0.0;
 
-            if ($itemType === StockService::ITEM_TYPE_INVENTORY_PRODUCT) {
-                $inventoryProduct = InventoryProduct::query()->lockForUpdate()->findOrFail($itemId);
+            $inventoryProduct = InventoryProduct::query()->lockForUpdate()->findOrFail($itemId);
 
-                if (! $inventoryProduct->is_stockable) {
-                    throw new \RuntimeException(Messages::EM026);
-                }
-
-                $inputUom = ! empty($dto['uom_id']) ? Uom::query()->findOrFail($dto['uom_id']) : $inventoryProduct->uom;
-                $this->stockService->assertCompatible($inputUom, $inventoryProduct->uom);
-
-                $quantity = $this->stockService->toBaseQuantity($inputUom, $quantity);
-                $unitCost = $inventoryProduct->average_cost !== null ? (float) $inventoryProduct->average_cost : 0.0;
-            } elseif ($itemType === StockService::ITEM_TYPE_PRODUCT) {
-                Product::query()->findOrFail($itemId);
-            } elseif ($itemType === StockService::ITEM_TYPE_COMBO) {
-                Combo::query()->findOrFail($itemId);
+            if (! $inventoryProduct->is_stockable) {
+                throw new \RuntimeException(Messages::EM026);
             }
+
+            $inputUom = ! empty($dto['uom_id']) ? Uom::query()->findOrFail($dto['uom_id']) : $inventoryProduct->uom;
+            $this->stockService->assertCompatible($inputUom, $inventoryProduct->uom);
+
+            $quantity = $this->stockService->toBaseQuantity($inputUom, $quantity);
+            $unitCost = $inventoryProduct->average_cost !== null ? (float) $inventoryProduct->average_cost : 0.0;
 
             // Feasibility is checked only against the source warehouse — receiving
             // stock at the destination can never fail.
             $available = $this->stockService->currentQuantity($itemType, $itemId, $fromWarehouseId);
             if ($quantity > $available) {
-                if ($inputUom) {
-                    $factor = $this->stockService->resolveConversionFactor($inputUom);
-                    $availableDisplay = $factor > 0 ? $available / $factor : $available;
-                    $unitLabel = ' '.$inputUom->uom_short;
-                } else {
-                    $availableDisplay = $available;
-                    $unitLabel = '';
-                }
+                $factor = $this->stockService->resolveConversionFactor($inputUom);
+                $availableDisplay = $factor > 0 ? $available / $factor : $available;
+                $unitLabel = ' '.$inputUom->uom_short;
 
                 throw new \RuntimeException(
                     Messages::EM027.' at source warehouse. Available: '
@@ -95,7 +84,7 @@ class StockTransferService
                 'item_type' => $itemType,
                 'item_id' => $itemId,
                 'quantity' => $quantity,
-                'input_uom_id' => $inputUom?->id,
+                'input_uom_id' => $inputUom->id,
                 'unit_cost' => $unitCost,
                 'total_cost' => $totalCost,
                 'batch_number' => $dto['batch_number'] ?? null,

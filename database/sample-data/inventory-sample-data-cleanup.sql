@@ -6,7 +6,6 @@ BEGIN;
 DELETE FROM inventory_stock_balances  WHERE id LIKE 'seed-inv-%';
 DELETE FROM inventory_stock_movements WHERE id LIKE 'seed-inv-%';
 DELETE FROM inventory_products        WHERE id LIKE 'seed-inv-%';
-DELETE FROM combo                     WHERE id LIKE 'seed-inv-%';
 DELETE FROM inventory_warehouses      WHERE id LIKE 'seed-inv-%';
 DELETE FROM inventory_uoms            WHERE id LIKE 'seed-inv-%';
 

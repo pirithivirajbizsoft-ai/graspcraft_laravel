@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\BomItem;
 use App\Models\Combo;
 use App\Models\ComboUserCommission;
 use App\Models\ProdCombMap;
 use App\Models\User;
+use App\Services\Inventory\BomService;
 use App\Support\Enums\UsersType;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +21,8 @@ class CommissionValidationError extends \RuntimeException {}
 /** Port of graspcraft_backend/src/modules/admin/combo/combo.service.ts. */
 class ComboService
 {
+    public function __construct(private readonly BomService $bomService) {}
+
     /** Commission may be configured for anyone except these. */
     private const COMMISSION_EXCLUDED_USER_TYPES = [
         UsersType::SUPER_ADMIN->value,
@@ -98,6 +102,11 @@ class ComboService
                 ComboUserCommission::create($row);
             }
 
+            // New functionality, not part of the Node port — see BomService.
+            if (array_key_exists('bom_items', $dto)) {
+                $this->bomService->replaceFor('COMBO', $combo->id, $dto['bom_items']);
+            }
+
             return $combo;
         });
     }
@@ -113,6 +122,7 @@ class ComboService
                 'comboUserCommission.user' => fn ($q) => $q->select([
                     'id', 'user_name', 'name', 'user_type', 'status',
                 ]),
+                'bomItems.inventoryProduct.uom',
             ])
             ->where('id', $id)
             ->first();
@@ -153,6 +163,13 @@ class ComboService
                 }
             }
 
+            // New functionality — see BomService. array_key_exists (not
+            // !empty) so a submitted [] clears every row, same as
+            // user_commissions above.
+            if (array_key_exists('bom_items', $dto)) {
+                $this->bomService->replaceFor('COMBO', $id, $dto['bom_items']);
+            }
+
             return $updateCombo;
         });
     }
@@ -166,6 +183,10 @@ class ComboService
 
             // Config only — the earned ledger keeps its own snapshot and is untouched.
             ComboUserCommission::query()->where('combo_id', $id)->forceDelete();
+
+            // New functionality — BOM is configuration, not a historical
+            // reference, so it's cleaned up rather than blocking delete.
+            BomItem::query()->where('owner_type', 'COMBO')->where('owner_id', $id)->delete();
         }
 
         return $deleteCombo;

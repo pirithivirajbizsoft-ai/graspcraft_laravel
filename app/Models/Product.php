@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /** Port of graspcraft_backend/src/database/models/Products.ts. */
 class Product extends BaseModel
@@ -36,5 +37,16 @@ class Product extends BaseModel
     public function prodCombMap(): HasMany
     {
         return $this->hasMany(ProdCombMap::class, 'product_id', 'id');
+    }
+
+    /**
+     * BOM components consumed when one unit of this Product is sold (i.e.
+     * as a constituent of a sold Combo — a bare Product has no
+     * independent sale flow). New functionality, not a port of anything
+     * in graspcraft_backend. See App\Models\BomItem.
+     */
+    public function bomItems(): MorphMany
+    {
+        return $this->morphMany(BomItem::class, 'owner', 'owner_type', 'owner_id');
     }
 }

@@ -13,11 +13,12 @@ use Illuminate\Support\Str;
  * Internal bookkeeping table, not a screen of its own (the "Warehouse-wise
  * Stock" report reads it, but nothing writes to it directly) — every Stock
  * In/Out write updates it inside the same transaction as the ledger insert.
- * For an Inventory Product, InventoryProduct.current_stock is additionally
- * kept as SUM(current_quantity) across warehouses; Product and Combo have no
- * such cached column (see item_type on StockMovement for why) — their stock
- * lives only here. Not soft-deleted and has no separate audit trail; the
- * ledger (StockMovement) is the audit trail.
+ * InventoryProduct.current_stock is additionally kept as SUM(current_quantity)
+ * across warehouses for an Inventory Product. A Combo balance also exists
+ * here (see item_type on StockMovement), fed only by the order-driven stock
+ * deduction in StockMigrationService — Combo has no cached stock column of
+ * its own. Not soft-deleted and has no separate audit trail; the ledger
+ * (StockMovement) is the audit trail.
  */
 class StockBalance extends Model
 {

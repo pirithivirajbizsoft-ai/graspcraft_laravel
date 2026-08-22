@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Inventory;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Inventory\MigrateStockRequest;
+use App\Http\Requests\Inventory\StockRequirementsRequest;
 use App\Services\Inventory\StockMigrationService;
 use App\Support\ApiResponse;
 use App\Support\Messages;
@@ -41,11 +42,24 @@ class StockMigrationController extends Controller
     {
         try {
             $dto = $request->whitelisted();
-            $data = $this->stockMigrationService->migrate($dto['order_ids'], $dto['warehouse_id']);
+            $data = $this->stockMigrationService->migrate($dto['order_ids']);
 
             return ApiResponse::created(Messages::SC001, Messages::SM001, $data);
         } catch (\RuntimeException $e) {
             return ApiResponse::errorCreated(Messages::ER002, $e->getMessage(), $e);
+        } catch (\Throwable $e) {
+            return ApiResponse::errorCreated(Messages::ER001, Messages::EM008, $e);
+        }
+    }
+
+    /** Read-only "Stock Requirements" preview for the currently-selected orders — see StockMigrationService::previewRequirements(). */
+    public function requirements(StockRequirementsRequest $request): JsonResponse
+    {
+        try {
+            $dto = $request->whitelisted();
+            $data = $this->stockMigrationService->previewRequirements($dto['order_ids']);
+
+            return ApiResponse::created(Messages::SC001, Messages::SM004, $data);
         } catch (\Throwable $e) {
             return ApiResponse::errorCreated(Messages::ER001, Messages::EM008, $e);
         }

@@ -33,17 +33,24 @@ class AppServiceProvider extends ServiceProvider
 
     /**
      * The Inventory module's stock ledger (StockMovement/StockBalance,
-     * app/Models/Concerns/ReferencesStockItem.php) can point at three
-     * different kinds of item. A morph map stores the short type string
-     * (rather than a fully-qualified class name) in item_type, matching the
-     * values the Stock In/Out API accepts.
+     * app/Models/Concerns/ReferencesStockItem.php) can point at either an
+     * Inventory Item (Stock In/Out/Transfer) or a Combo (order-driven stock
+     * deduction only — see StockMigrationService, never a user-facing
+     * item-type choice). A morph map stores the short type string (rather
+     * than a fully-qualified class name) in item_type.
+     *
+     * The same global map is also reused by BomItem::owner() (owner_type/
+     * owner_id) — a different polymorphic relation, but Laravel's morph map
+     * is one shared registry, so 'PRODUCT' is registered here too rather
+     * than duplicating the map elsewhere. 'PRODUCT' is never a stock-ledger
+     * item_type (Product has no stock of its own — see StockService).
      */
     private function configureStockItemMorphMap(): void
     {
         Relation::morphMap([
             'INVENTORY_PRODUCT' => InventoryProduct::class,
-            'PRODUCT' => Product::class,
             'COMBO' => Combo::class,
+            'PRODUCT' => Product::class,
         ]);
     }
 

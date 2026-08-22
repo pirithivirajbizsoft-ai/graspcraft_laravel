@@ -20,6 +20,13 @@ class CreateProductRequest extends ClassValidatorRequest
             'img_url' => ['IsNotEmpty', 'IsString'],
             'status' => ['IsNotEmpty', 'IsBoolean'],
             'certificate_name' => ['IsOptional', 'IsString'],
+            /*
+             * New functionality, not part of the Node DTO this class ports —
+             * declared here purely so whitelisted() does not strip it. Per-row
+             * shape ({inventory_product_id, quantity}) is validated in
+             * BomService.
+             */
+            'bom_items' => ['IsArray', 'IsOptional'],
         ];
     }
 }

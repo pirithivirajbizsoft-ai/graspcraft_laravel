@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\CreateProductRequest;
 use App\Http\Requests\CreateProductSizeRequest;
 use App\Http\Requests\UpdateProductRequest;
+use App\Services\Inventory\BomValidationError;
 use App\Services\ProductsService;
 use App\Support\ApiResponse;
 use App\Support\Messages;
@@ -23,6 +24,10 @@ class ProductsController extends Controller
             $data = $this->productsService->create($request->whitelisted());
 
             return ApiResponse::created(Messages::SC001, Messages::SM001, $data);
+        } catch (BomValidationError $e) {
+            // BOM validation failures carry a message the user can act on;
+            // everything else keeps the generic EM008.
+            return ApiResponse::errorCreated(Messages::ER001, $e->getMessage(), $e);
         } catch (\Throwable $e) {
             return ApiResponse::errorCreated(Messages::ER001, Messages::EM008, $e);
         }
@@ -45,6 +50,8 @@ class ProductsController extends Controller
             $data = $this->productsService->update($id, $request->whitelisted());
 
             return ApiResponse::success(Messages::SC001, Messages::SM002, $data);
+        } catch (BomValidationError $e) {
+            return ApiResponse::error(Messages::ER001, $e->getMessage(), $e);
         } catch (\Throwable $e) {
             return ApiResponse::error(Messages::ER001, Messages::EM008, $e);
         }

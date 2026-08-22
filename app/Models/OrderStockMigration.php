@@ -59,6 +59,17 @@ class OrderStockMigration extends Model
         return $this->belongsTo(Warehouse::class, 'warehouse_id');
     }
 
+    /**
+     * Keyed by the human order_id, same as this table itself — not a DB
+     * foreign key (see class docblock), just an Eloquent-side join so
+     * findAll()/findOne() can surface the order's amount/staff for the
+     * Stock Migration screen without a raw query.
+     */
+    public function order(): BelongsTo
+    {
+        return $this->belongsTo(Order::class, 'order_id', 'order_id');
+    }
+
     protected static function booted(): void
     {
         static::creating(function (self $model) {

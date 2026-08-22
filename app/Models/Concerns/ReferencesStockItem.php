@@ -5,14 +5,15 @@ namespace App\Models\Concerns;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 /**
- * Shared by StockMovement and StockBalance: both point at one of three
- * different tables (inventory_products, the existing products, or the
- * existing combo) via a polymorphic item_type/item_id pair rather than a
- * single FK — see the morph map registered in AppServiceProvider::boot().
+ * Shared by StockMovement and StockBalance: both point at either
+ * inventory_products (Stock In/Out/Transfer) or the existing combo table
+ * (order-driven stock deduction only, see StockMigrationService) via a
+ * polymorphic item_type/item_id pair rather than a single FK — see the
+ * morph map registered in AppServiceProvider::boot().
  *
- * The three source tables use different "name" columns (InventoryProduct:
- * name, Product: product_name, Combo: combo_name), so getItemLabelAttribute
- * normalises that into one field the API can return regardless of type.
+ * The two source tables use different "name" columns (InventoryProduct:
+ * name, Combo: combo_name), so getItemLabelAttribute normalises that into
+ * one field the API can return regardless of type.
  */
 trait ReferencesStockItem
 {

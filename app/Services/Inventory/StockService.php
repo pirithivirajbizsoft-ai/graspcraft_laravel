@@ -17,27 +17,19 @@ use App\Support\Messages;
  * balance/product-stock update happens explicitly in PHP, inside the same
  * transaction as the ledger insert, exactly once per movement.
  *
- * Three kinds of item share this one ledger (see the morph map in
- * AppServiceProvider::boot()): the Inventory module's own Product, and the
- * two pre-existing, Node-owned catalog tables (Product, Combo). Only the
- * Inventory Product has a unit-of-measure/conversion concept and a cached
- * current_stock/average_cost on its own row — Product and Combo are tracked
- * purely as plain counts, with inventory_stock_balances as their only
- * source of truth, so that neither of those live tables needed a new column.
+ * Stock In / Stock Out / Stock Transfer only ever act on the Inventory
+ * module's own Product (item_type INVENTORY_PRODUCT) — the pre-existing,
+ * Node-owned Product/Combo catalogs have no stock maintenance of their own.
+ * The ledger (see the morph map in AppServiceProvider::boot()) still also
+ * accepts item_type COMBO, but only from the order-driven stock deduction in
+ * StockMigrationService, never from a user-facing item-type choice.
  */
 class StockService
 {
     public const ITEM_TYPE_INVENTORY_PRODUCT = 'INVENTORY_PRODUCT';
 
-    public const ITEM_TYPE_PRODUCT = 'PRODUCT';
-
+    /** Used only by StockMigrationService's order-driven deduction, never a user-facing choice. */
     public const ITEM_TYPE_COMBO = 'COMBO';
-
-    public const ITEM_TYPES = [
-        self::ITEM_TYPE_INVENTORY_PRODUCT,
-        self::ITEM_TYPE_PRODUCT,
-        self::ITEM_TYPE_COMBO,
-    ];
 
     /** 1.0 for a base unit; the unit's own factor for a derived unit. */
     public function resolveConversionFactor(Uom $uom): float

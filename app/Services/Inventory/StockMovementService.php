@@ -10,6 +10,11 @@ use Illuminate\Support\Collection;
  * Read-only ledger listing, reused by the Stock In/Out screens for their
  * on-hand lookup instead of duplicating that query. New functionality, not
  * a port of anything in graspcraft_backend.
+ *
+ * Scoped to Inventory Items only (item_type INVENTORY_PRODUCT) — Product/
+ * Combo stock maintenance doesn't exist, and the Combo movements written by
+ * the order-driven stock migration (StockMigrationService) have their own
+ * dedicated Stock Migration screen, so they're deliberately excluded here.
  */
 class StockMovementService
 {
@@ -22,11 +27,9 @@ class StockMovementService
         $limit = $req['limit'] ?? null ?: 10;
         $offset = ($pageNo - 1) * $limit;
 
-        $query = StockMovement::query()->with(['item', 'warehouse', 'inputUom']);
-
-        if (! empty($req['item_type'])) {
-            $query->where('item_type', $req['item_type']);
-        }
+        $query = StockMovement::query()
+            ->with(['item', 'warehouse', 'inputUom'])
+            ->where('item_type', StockService::ITEM_TYPE_INVENTORY_PRODUCT);
 
         if (! empty($req['item_id'])) {
             $query->where('item_id', $req['item_id']);
@@ -59,17 +62,17 @@ class StockMovementService
         return StockMovement::query()->with(['item', 'warehouse', 'inputUom'])->where('id', $id)->first();
     }
 
-    /** On-hand quantity for an item at a warehouse, for the Stock In/Out forms' live lookup. */
-    public function itemInfo(string $itemType, string $itemId, string $warehouseId): array
+    /** On-hand quantity for an Inventory Item at a warehouse, for the Stock In/Out forms' live lookup. */
+    public function itemInfo(string $itemId, string $warehouseId): array
     {
-        return ['quantity' => $this->stockService->currentQuantity($itemType, $itemId, $warehouseId)];
+        return ['quantity' => $this->stockService->currentQuantity(StockService::ITEM_TYPE_INVENTORY_PRODUCT, $itemId, $warehouseId)];
     }
 
     /**
-     * Current on-hand quantity per item per warehouse, across all three
-     * stocked catalogs — the "Warehouse-wise Stock" report. Zero-quantity
-     * rows are included (a balance row exists once any movement has ever
-     * touched that item+warehouse, even if it's since netted to zero).
+     * Current on-hand quantity per Inventory Item per warehouse — the
+     * "Warehouse-wise Stock" report. Zero-quantity rows are included (a
+     * balance row exists once any movement has ever touched that
+     * item+warehouse, even if it's since netted to zero).
      *
      * @return array{count: int, rows: Collection}
      */
@@ -79,11 +82,9 @@ class StockMovementService
         $limit = $req['limit'] ?? null ?: 10;
         $offset = ($pageNo - 1) * $limit;
 
-        $query = StockBalance::query()->with(['item', 'warehouse']);
-
-        if (! empty($req['item_type'])) {
-            $query->where('item_type', $req['item_type']);
-        }
+        $query = StockBalance::query()
+            ->with(['item', 'warehouse'])
+            ->where('item_type', StockService::ITEM_TYPE_INVENTORY_PRODUCT);
 
         if (! empty($req['item_id'])) {
             $query->where('item_id', $req['item_id']);

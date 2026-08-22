@@ -271,5 +271,6 @@ Route::prefix('inventory')->group(function () {
         Route::post('getall', [StockMigrationController::class, 'findAll']);
         Route::get('getby-id/{orderId}', [StockMigrationController::class, 'findOne']);
         Route::post('migrate', [StockMigrationController::class, 'migrate']);
+        Route::post('requirements', [StockMigrationController::class, 'requirements']);
     });
 });

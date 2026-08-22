@@ -108,6 +108,8 @@ final class Messages
 
     public const EM032 = 'No eligible orders were selected for migration.';
 
+    public const EM033 = 'This inventory item is used in a Bill of Materials and cannot be deleted.';
+
     // ─── environment names ───────────────────────────────────────────────────
     public const DEVELOPMENT = 'dev';
 

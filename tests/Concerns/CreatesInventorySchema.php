@@ -116,6 +116,18 @@ trait CreatesInventorySchema
             $table->timestamp('deleted_at')->nullable();
         });
 
+        // Minimal stand-in for the pre-existing, Node-owned orders table —
+        // only the columns StockMigrationService's completion gate reads.
+        Schema::create('orders', function ($table) {
+            $table->string('id')->primary();
+            $table->string('order_id')->nullable();
+            $table->string('kiosk_id')->nullable();
+            $table->string('customer_id')->nullable();
+            $table->string('order_status')->nullable();
+            $table->timestamps();
+            $table->timestamp('deleted_at')->nullable();
+        });
+
         Schema::create('inventory_order_stock_migrations', function ($table) {
             $table->string('id')->primary();
             $table->string('order_id')->unique();
@@ -133,6 +145,41 @@ trait CreatesInventorySchema
             $table->string('combo_id');
             $table->string('combo_name')->nullable();
             $table->integer('quantity');
+            $table->string('status')->default('PENDING');
+            $table->decimal('shortfall_quantity', 14, 3)->nullable();
+            $table->timestamps();
+        });
+
+        // BOM definition rows attached to a Product or a Combo — see
+        // app/Models/BomItem.php.
+        Schema::create('inventory_bom_items', function ($table) {
+            $table->string('id')->primary();
+            $table->string('owner_type');
+            $table->string('owner_id');
+            $table->string('inventory_product_id');
+            $table->decimal('quantity', 14, 3);
+            $table->timestamps();
+            $table->unique(['owner_type', 'owner_id', 'inventory_product_id']);
+        });
+
+        // prod-comb-map (junction, Node-owned in the real schema) — needed
+        // by StockMigrationService::resolveBomRequirements() to expand a
+        // Combo into its constituent Products.
+        Schema::create('prod-comb-map', function ($table) {
+            $table->string('id')->primary();
+            $table->string('product_id');
+            $table->string('combo_id');
+            $table->timestamps();
+            $table->timestamp('deleted_at')->nullable();
+        });
+
+        // Per-BOM-component deduction outcome for one captured order line —
+        // see app/Models/OrderStockMigrationBomItem.php.
+        Schema::create('inventory_order_stock_migration_bom_items', function ($table) {
+            $table->string('id')->primary();
+            $table->string('migration_item_id');
+            $table->string('inventory_product_id');
+            $table->decimal('quantity', 14, 3);
             $table->string('status')->default('PENDING');
             $table->decimal('shortfall_quantity', 14, 3)->nullable();
             $table->timestamps();

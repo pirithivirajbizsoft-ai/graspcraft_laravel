@@ -2,6 +2,7 @@
 
 namespace App\Services\Inventory;
 
+use App\Models\BomItem;
 use App\Models\InventoryProduct;
 use App\Models\Uom;
 use App\Support\Messages;
@@ -91,6 +92,12 @@ class ProductService
 
         if ((float) $product->current_stock > 0) {
             throw new \RuntimeException(Messages::EM023);
+        }
+
+        // New functionality — a BOM row referencing this item would otherwise
+        // dangle. See BomItem/BomService.
+        if (BomItem::query()->where('inventory_product_id', $id)->exists()) {
+            throw new \RuntimeException(Messages::EM033);
         }
 
         return $product->delete();

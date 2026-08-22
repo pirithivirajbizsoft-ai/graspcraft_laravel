@@ -19,6 +19,8 @@ class UpdateProductRequest extends ClassValidatorRequest
             'img_url' => ['IsNotEmpty', 'IsString', 'IsOptional'],
             'status' => ['IsNotEmpty', 'IsBoolean', 'IsOptional'],
             'certificate_name' => ['IsOptional', 'IsString'],
+            // New functionality — see CreateProductRequest.
+            'bom_items' => ['IsArray', 'IsOptional'],
         ];
     }
 }

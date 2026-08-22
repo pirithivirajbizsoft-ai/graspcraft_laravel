@@ -3,8 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\Combo;
+use App\Models\Order;
 use App\Models\OrderStockMigration;
-use App\Models\Product;
 use App\Models\Uom;
 use App\Models\Warehouse;
 use App\Services\Inventory\ProductService;
@@ -84,8 +84,9 @@ class StockTransferAndMigrationTest extends TestCase
 
     public function test_transfer_rejects_same_source_and_destination_and_insufficient_stock(): void
     {
+        $pcs = Uom::create(['name' => 'Piece', 'uom_short' => 'PCS']);
         $warehouse = app(WarehouseService::class)->create(['name' => 'Main Store']);
-        $product = Product::create(['product_name' => '8x10 Print', 'price' => 500, 'status' => true]);
+        $product = app(ProductService::class)->create(['name' => 'Photo Paper', 'uom_id' => $pcs->id, 'unit_price' => 10]);
 
         $stockTransferService = app(StockTransferService::class);
 
@@ -93,30 +94,31 @@ class StockTransferAndMigrationTest extends TestCase
         $this->expectExceptionMessage('The destination warehouse must be different from the source warehouse.');
 
         $stockTransferService->create([
-            'item_type' => StockService::ITEM_TYPE_PRODUCT,
             'item_id' => $product->id,
             'from_warehouse_id' => $warehouse->id,
             'to_warehouse_id' => $warehouse->id,
             'quantity' => 1,
+            'uom_id' => $pcs->id,
             'transfer_reason' => 'test',
         ]);
     }
 
     public function test_transfer_rejects_insufficient_stock_at_source(): void
     {
+        $pcs = Uom::create(['name' => 'Piece', 'uom_short' => 'PCS']);
         $main = app(WarehouseService::class)->create(['name' => 'Main Store']);
         $branch = app(WarehouseService::class)->create(['name' => 'Branch Store']);
-        $product = Product::create(['product_name' => '8x10 Print', 'price' => 500, 'status' => true]);
+        $product = app(ProductService::class)->create(['name' => 'Photo Paper', 'uom_id' => $pcs->id, 'unit_price' => 10]);
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessageMatches('/Insufficient stock/');
 
         app(StockTransferService::class)->create([
-            'item_type' => StockService::ITEM_TYPE_PRODUCT,
             'item_id' => $product->id,
             'from_warehouse_id' => $main->id,
             'to_warehouse_id' => $branch->id,
             'quantity' => 5,
+            'uom_id' => $pcs->id,
             'transfer_reason' => 'test',
         ]);
     }
@@ -126,13 +128,15 @@ class StockTransferAndMigrationTest extends TestCase
         $warehouse = app(WarehouseService::class)->create(['name' => 'Main Store']);
         $combo = Combo::create(['combo_name' => 'Family Bundle', 'price' => 2000, 'status' => true]);
 
-        app(StockInService::class)->create([
-            'item_type' => StockService::ITEM_TYPE_COMBO,
-            'item_id' => $combo->id,
-            'warehouse_id' => $warehouse->id,
-            'quantity' => 10,
-            'movement_subtype' => 'OPENING_STOCK',
-        ]);
+        // Opening stock for the combo — seeded directly against the ledger
+        // (not via StockInService, which now only accepts Inventory Items),
+        // matching how the order-driven deduction below itself only ever
+        // moves a Combo balance through StockService, never through Stock In.
+        app(StockService::class)->applyMovement(StockService::ITEM_TYPE_COMBO, $combo->id, $warehouse, 'IN', 10);
+
+        // Stock Migration only ever acts on an order that has reached
+        // Completed — see StockMigrationService class docblock.
+        Order::create(['order_id' => 'ORD-TEST-0001', 'order_status' => 'completed']);
 
         $migrationService = app(StockMigrationService::class);
 
@@ -152,7 +156,7 @@ class StockTransferAndMigrationTest extends TestCase
         $migrationService->captureOrder('ORD-TEST-0001', 'cust-1', [$cartRow]);
         $this->assertSame(1, OrderStockMigration::query()->where('order_id', 'ORD-TEST-0001')->count());
 
-        $results = $migrationService->migrate(['ORD-TEST-0001'], $warehouse->id);
+        $results = $migrationService->migrate(['ORD-TEST-0001']);
         $this->assertSame('migrated', $results[0]['outcome']);
 
         $stockService = app(StockService::class);
@@ -160,11 +164,10 @@ class StockTransferAndMigrationTest extends TestCase
 
         $migration->refresh();
         $this->assertSame('MIGRATED', $migration->status);
-        $this->assertSame($warehouse->id, $migration->warehouse_id);
         $this->assertNotNull($migration->migrated_at);
 
         // Retrying an already-migrated order must not double-deduct.
-        $results = $migrationService->migrate(['ORD-TEST-0001'], $warehouse->id);
+        $results = $migrationService->migrate(['ORD-TEST-0001']);
         $this->assertSame('not_eligible', $results[0]['outcome']);
         $this->assertEquals(7, $stockService->currentQuantity(StockService::ITEM_TYPE_COMBO, $combo->id, $warehouse->id));
     }
@@ -175,14 +178,10 @@ class StockTransferAndMigrationTest extends TestCase
         $plentiful = Combo::create(['combo_name' => 'Plentiful Bundle', 'price' => 1000, 'status' => true]);
         $scarce = Combo::create(['combo_name' => 'Scarce Bundle', 'price' => 1500, 'status' => true]);
 
-        app(StockInService::class)->create([
-            'item_type' => StockService::ITEM_TYPE_COMBO,
-            'item_id' => $plentiful->id,
-            'warehouse_id' => $warehouse->id,
-            'quantity' => 10,
-            'movement_subtype' => 'OPENING_STOCK',
-        ]);
+        app(StockService::class)->applyMovement(StockService::ITEM_TYPE_COMBO, $plentiful->id, $warehouse, 'IN', 10);
         // Deliberately no stock-in for $scarce — it starts at 0.
+
+        Order::create(['order_id' => 'ORD-TEST-0002', 'order_status' => 'completed']);
 
         $migrationService = app(StockMigrationService::class);
         $migrationService->captureOrder('ORD-TEST-0002', 'cust-2', [
@@ -190,7 +189,7 @@ class StockTransferAndMigrationTest extends TestCase
             (object) ['combo_id' => $scarce->id, 'qty' => 1, 'combo' => $scarce],
         ]);
 
-        $results = $migrationService->migrate(['ORD-TEST-0002'], $warehouse->id);
+        $results = $migrationService->migrate(['ORD-TEST-0002']);
         $this->assertSame('partial', $results[0]['outcome']);
 
         $stockService = app(StockService::class);
@@ -208,15 +207,9 @@ class StockTransferAndMigrationTest extends TestCase
         $this->assertEquals(1, (float) $items[$scarce->id]->shortfall_quantity);
 
         // Top up the scarce combo and retry — only the still-pending line should move.
-        app(StockInService::class)->create([
-            'item_type' => StockService::ITEM_TYPE_COMBO,
-            'item_id' => $scarce->id,
-            'warehouse_id' => $warehouse->id,
-            'quantity' => 5,
-            'movement_subtype' => 'PURCHASE',
-        ]);
+        app(StockService::class)->applyMovement(StockService::ITEM_TYPE_COMBO, $scarce->id, $warehouse, 'IN', 5);
 
-        $results = $migrationService->migrate(['ORD-TEST-0002'], $warehouse->id);
+        $results = $migrationService->migrate(['ORD-TEST-0002']);
         $this->assertSame('migrated', $results[0]['outcome']);
         $this->assertEquals(8, $stockService->currentQuantity(StockService::ITEM_TYPE_COMBO, $plentiful->id, $warehouse->id), 'the already-migrated line must not be deducted again');
         $this->assertEquals(4, $stockService->currentQuantity(StockService::ITEM_TYPE_COMBO, $scarce->id, $warehouse->id));
@@ -227,19 +220,15 @@ class StockTransferAndMigrationTest extends TestCase
         $warehouse = app(WarehouseService::class)->create(['name' => 'Main Store']);
         $combo = Combo::create(['combo_name' => 'Family Bundle', 'price' => 2000, 'status' => true]);
 
-        app(StockInService::class)->create([
-            'item_type' => StockService::ITEM_TYPE_COMBO,
-            'item_id' => $combo->id,
-            'warehouse_id' => $warehouse->id,
-            'quantity' => 10,
-            'movement_subtype' => 'OPENING_STOCK',
-        ]);
+        app(StockService::class)->applyMovement(StockService::ITEM_TYPE_COMBO, $combo->id, $warehouse, 'IN', 10);
+
+        Order::create(['order_id' => 'ORD-TEST-0003', 'order_status' => 'completed']);
 
         $migrationService = app(StockMigrationService::class);
         $migrationService->captureOrder('ORD-TEST-0003', 'cust-3', [
             (object) ['combo_id' => $combo->id, 'qty' => 4, 'combo' => $combo],
         ]);
-        $migrationService->migrate(['ORD-TEST-0003'], $warehouse->id);
+        $migrationService->migrate(['ORD-TEST-0003']);
 
         $stockService = app(StockService::class);
         $this->assertEquals(6, $stockService->currentQuantity(StockService::ITEM_TYPE_COMBO, $combo->id, $warehouse->id));

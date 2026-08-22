@@ -18,6 +18,8 @@ class UpdateComboRequest extends ClassValidatorRequest
             'img_url' => ['IsString', 'IsNotEmpty', 'IsOptional'],
             'status' => ['IsBoolean', 'IsNotEmpty', 'IsOptional'],
             'user_commissions' => ['IsArray', 'IsOptional'],
+            // New functionality — see CreateComboRequest.
+            'bom_items' => ['IsArray', 'IsOptional'],
         ];
     }
 }

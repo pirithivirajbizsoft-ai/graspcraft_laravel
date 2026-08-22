@@ -17,10 +17,11 @@ use Illuminate\Support\Str;
  * today.
  *
  * item_type/item_id is polymorphic (see ReferencesStockItem + the morph map
- * in AppServiceProvider::boot()) so the same ledger covers three different
- * kinds of stocked item: the Inventory module's own Product, and the two
- * pre-existing, Node-owned catalog tables (Product, Combo) — neither of
- * which gained any new column of their own for this.
+ * in AppServiceProvider::boot()). Stock In/Out/Transfer only ever write
+ * item_type INVENTORY_PRODUCT — the pre-existing, Node-owned Product/Combo
+ * catalogs have no stock maintenance of their own. item_type COMBO also
+ * appears here, but only from the order-driven stock deduction in
+ * StockMigrationService, never from a user-facing item-type choice.
  */
 class StockMovement extends Model
 {

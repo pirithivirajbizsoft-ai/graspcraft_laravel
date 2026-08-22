@@ -44,7 +44,6 @@ class StockMovementController extends Controller
     {
         try {
             $data = $this->stockMovementService->itemInfo(
-                (string) $request->query('item_type'),
                 (string) $request->query('item_id'),
                 (string) $request->query('warehouse_id'),
             );
@@ -55,7 +54,7 @@ class StockMovementController extends Controller
         }
     }
 
-    /** Current on-hand quantity per item per warehouse, across all stocked catalogs. */
+    /** Current on-hand quantity per Inventory Item per warehouse. */
     public function warehouseStock(Request $request): JsonResponse
     {
         try {

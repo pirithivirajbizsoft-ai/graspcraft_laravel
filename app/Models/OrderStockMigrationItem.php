@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 /**
@@ -52,6 +53,16 @@ class OrderStockMigrationItem extends Model
     public function combo(): BelongsTo
     {
         return $this->belongsTo(Combo::class, 'combo_id');
+    }
+
+    /**
+     * Per-BOM-component deduction outcome for this line — see
+     * StockMigrationService::resolveBomRequirements() and
+     * OrderStockMigrationBomItem.
+     */
+    public function bomItems(): HasMany
+    {
+        return $this->hasMany(OrderStockMigrationBomItem::class, 'migration_item_id');
     }
 
     protected static function booted(): void
