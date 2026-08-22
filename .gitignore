@@ -14,10 +14,6 @@
 /.zed
 /auth.json
 /node_modules
-/public/build
-/public/fonts-manifest.dev.json
-/public/hot
-/public/storage
 /storage/*.key
 /storage/pail
 /vendor
@@ -25,3 +21,19 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# The Angular panel is built in graspcraft_frontend and its output is copied in
+# here, so everything under public/ is generated - hashed bundles, prerendered
+# routes, assets, licences. Only Laravel's own four files belong in the repo.
+#
+# Consequence to remember when deploying: pulling this branch no longer brings a
+# built panel with it. The server has to run the frontend build and copy its
+# dist/ into public/, or the copy has to be shipped some other way.
+#
+# Anything listed separately before (build/, hot, storage, the fonts manifest)
+# is covered by the blanket rule now.
+/public/*
+!/public/.htaccess
+!/public/index.php
+!/public/robots.txt
+!/public/favicon.ico
