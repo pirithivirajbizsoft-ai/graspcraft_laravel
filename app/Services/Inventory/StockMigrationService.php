@@ -14,11 +14,16 @@ use Illuminate\Support\Facades\DB;
  * "Stock Migration" — turning what a customer ordered into real stock
  * deductions. New functionality, not a port of anything in
  * graspcraft_backend, adapted from an inventory reference built around a
- * POS/booking system Photocraft doesn't have. Two adaptations from that
+ * POS/booking system Photocraft doesn't have. Adaptations from that
  * reference, made deliberately:
  *
- *  - Trigger is MANUAL, from a back-office screen (migrate()) — not
- *    automatic at order creation. Checkout stays completely unchanged.
+ *  - Capture is automatic at order creation (captureOrder()); deduction is
+ *    additionally attempted automatically the moment an order is marked
+ *    Completed (completeOrder(), called from UsersService::updateOrder()),
+ *    trying every active warehouse in turn for each line. A line no
+ *    warehouse can fully cover is left PENDING/FAILED rather than blocking
+ *    completion — a back-office user resolves it later from the manual
+ *    migrate() screen. Checkout (order creation) itself stays unchanged.
  *  - A Combo line always deducts the Combo's OWN stock balance — there is
  *    no Bill-of-Materials cascade into its component Products (Combo is
  *    already tracked independently of its components elsewhere in this
@@ -169,14 +174,7 @@ class StockMigrationService
 
                 try {
                     DB::transaction(function () use ($item, $warehouse, $orderId) {
-                        $alreadyDeducted = StockMovement::query()
-                            ->where('reference_type', 'SALES_ORDER')
-                            ->where('reference_id', $orderId)
-                            ->where('item_type', StockService::ITEM_TYPE_COMBO)
-                            ->where('item_id', $item->combo_id)
-                            ->exists();
-
-                        if ($alreadyDeducted) {
+                        if ($this->alreadyDeducted($item, $orderId)) {
                             $item->update(['status' => 'MIGRATED', 'shortfall_quantity' => null]);
 
                             return;
@@ -197,30 +195,7 @@ class StockMigrationService
                             return;
                         }
 
-                        StockMovement::create([
-                            'movement_number' => $this->stockService->generateMovementNumber('OUT'),
-                            'movement_type' => 'OUT',
-                            'movement_subtype' => 'SALE',
-                            'item_type' => StockService::ITEM_TYPE_COMBO,
-                            'item_id' => $item->combo_id,
-                            'warehouse_id' => $warehouse->id,
-                            'quantity' => $item->quantity,
-                            'unit_cost' => 0,
-                            'total_cost' => 0,
-                            'reference_type' => 'SALES_ORDER',
-                            'reference_id' => $orderId,
-                            'notes' => 'Stock migration for order '.$orderId,
-                        ]);
-
-                        $this->stockService->applyMovement(
-                            StockService::ITEM_TYPE_COMBO,
-                            $item->combo_id,
-                            $warehouse,
-                            'OUT',
-                            (float) $item->quantity
-                        );
-
-                        $item->update(['status' => 'MIGRATED', 'shortfall_quantity' => null]);
+                        $this->deductItem($item, $warehouse, $orderId);
                     });
                 } catch (\Throwable) {
                     $item->update(['status' => 'FAILED', 'shortfall_quantity' => $item->quantity]);
@@ -242,6 +217,137 @@ class StockMigrationService
         }
 
         return $results;
+    }
+
+    /**
+     * Auto-deduct stock the moment an order is marked Completed — called
+     * from UsersService::updateOrder(), wrapped there in try/catch so a
+     * stock problem can never block the order/commission update it runs
+     * alongside (same principle as reverse() below).
+     *
+     * Unlike migrate(), no warehouse is chosen up front: each line is
+     * checked against every active warehouse in turn and deducted from the
+     * first one that holds enough. A line no warehouse can fully cover is
+     * left PENDING/FAILED — untouched — for a back-office user to resolve
+     * later from the manual Stock Migration screen. The order still
+     * completes either way; this method never throws.
+     */
+    public function completeOrder(string $orderId): void
+    {
+        $migration = OrderStockMigration::query()->with('items')->where('order_id', $orderId)->first();
+
+        if (! $migration || ! in_array($migration->status, ['PENDING', 'FAILED'], true)) {
+            return;
+        }
+
+        if ($migration->items->isEmpty()) {
+            $migration->update(['status' => 'MIGRATED', 'migrated_at' => now()]);
+
+            return;
+        }
+
+        $warehouses = Warehouse::query()->active()->orderBy('id')->get();
+        $anyFailed = false;
+
+        foreach ($migration->items as $item) {
+            if ($item->status === 'MIGRATED') {
+                continue;
+            }
+
+            if ($this->alreadyDeducted($item, $orderId)) {
+                $item->update(['status' => 'MIGRATED', 'shortfall_quantity' => null]);
+
+                continue;
+            }
+
+            $warehouse = null;
+            $bestAvailable = 0.0;
+
+            foreach ($warehouses as $candidate) {
+                $available = $this->stockService->currentQuantity(
+                    StockService::ITEM_TYPE_COMBO,
+                    $item->combo_id,
+                    $candidate->id
+                );
+
+                $bestAvailable = max($bestAvailable, $available);
+
+                if ((float) $item->quantity <= $available) {
+                    $warehouse = $candidate;
+
+                    break;
+                }
+            }
+
+            if (! $warehouse) {
+                $item->update([
+                    'status' => 'FAILED',
+                    'shortfall_quantity' => (float) $item->quantity - $bestAvailable,
+                ]);
+                $anyFailed = true;
+
+                continue;
+            }
+
+            try {
+                DB::transaction(fn () => $this->deductItem($item, $warehouse, $orderId));
+            } catch (\Throwable) {
+                $item->update(['status' => 'FAILED', 'shortfall_quantity' => $item->quantity]);
+                $anyFailed = true;
+            }
+        }
+
+        /*
+         * No single warehouse_id to record at the migration level here —
+         * lines can each come from a different warehouse. The authoritative
+         * record of which warehouse a line was actually deducted from is
+         * its inventory_stock_movements row (reference_type=SALES_ORDER).
+         */
+        $migration->update([
+            'status' => $anyFailed ? 'FAILED' : 'MIGRATED',
+            'migrated_at' => $anyFailed ? null : now(),
+            'failure_reason' => $anyFailed ? 'One or more items had insufficient stock in every warehouse.' : null,
+        ]);
+    }
+
+    /** Whether a line already has a real SALES_ORDER-tagged deduction — guards migrate() and completeOrder() against double-deducting. */
+    private function alreadyDeducted(OrderStockMigrationItem $item, string $orderId): bool
+    {
+        return StockMovement::query()
+            ->where('reference_type', 'SALES_ORDER')
+            ->where('reference_id', $orderId)
+            ->where('item_type', StockService::ITEM_TYPE_COMBO)
+            ->where('item_id', $item->combo_id)
+            ->exists();
+    }
+
+    /** Records the OUT movement and applies it to the balance. Caller has already confirmed availability. */
+    private function deductItem(OrderStockMigrationItem $item, Warehouse $warehouse, string $orderId): void
+    {
+        StockMovement::create([
+            'movement_number' => $this->stockService->generateMovementNumber('OUT'),
+            'movement_type' => 'OUT',
+            'movement_subtype' => 'SALE',
+            'item_type' => StockService::ITEM_TYPE_COMBO,
+            'item_id' => $item->combo_id,
+            'warehouse_id' => $warehouse->id,
+            'quantity' => $item->quantity,
+            'unit_cost' => 0,
+            'total_cost' => 0,
+            'reference_type' => 'SALES_ORDER',
+            'reference_id' => $orderId,
+            'notes' => 'Stock migration for order '.$orderId,
+        ]);
+
+        $this->stockService->applyMovement(
+            StockService::ITEM_TYPE_COMBO,
+            $item->combo_id,
+            $warehouse,
+            'OUT',
+            (float) $item->quantity
+        );
+
+        $item->update(['status' => 'MIGRATED', 'shortfall_quantity' => null]);
     }
 
     /**

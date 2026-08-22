@@ -675,6 +675,21 @@ class UsersService
                         'staff_name' => null,
                     ]);
                 }
+
+                /*
+                 * Attempt to deduct stock for whatever was captured at checkout.
+                 * Wrapped so a stock problem can never roll back the status/
+                 * commission update this is nested inside — same "money side and
+                 * stock side are allowed to disagree temporarily" principle as
+                 * the reversal above. A line no active warehouse can cover is
+                 * left PENDING/FAILED for the manual Stock Migration screen; the
+                 * order itself still completes regardless.
+                 */
+                try {
+                    $this->stockMigrationService->completeOrder($orderId);
+                } catch (\Throwable) {
+                    // Never let a stock problem block the order status update.
+                }
             }
 
             return $updated;
